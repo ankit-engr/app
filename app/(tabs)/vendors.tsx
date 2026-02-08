@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, SafeAreaView, TextInput } from 'react-native';
 import { Search } from 'lucide-react-native';
-import { supabase } from '@/lib/supabase';
+import { getVendors, getImageUrl } from '@/lib/api';
 import { Vendor } from '@/types/database';
 import VendorCard from '@/components/VendorCard';
+
+function mapApiVendorToVendor(v: import('@/lib/api').ApiVendor): Vendor {
+  return {
+    id: v.id,
+    name: v.name,
+    logo_url: v.logoUrl ?? v.logo_url ? getImageUrl(v.logoUrl ?? v.logo_url) : null,
+    description: v.description ?? null,
+    is_featured: v.is_featured ?? false,
+    created_at: '',
+  };
+}
 
 export default function VendorsScreen() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -14,14 +25,10 @@ export default function VendorsScreen() {
 
   const fetchVendors = async () => {
     try {
-      const { data } = await supabase
-        .from('vendors')
-        .select('*')
-        .order('is_featured', { ascending: false })
-        .order('name', { ascending: true });
-
-      setVendors((data as Vendor[]) || []);
-      setFilteredVendors((data as Vendor[]) || []);
+      const data = await getVendors(1, 200);
+      const list = data.map(mapApiVendorToVendor);
+      setVendors(list);
+      setFilteredVendors(list);
     } catch (error) {
       console.error('Error fetching vendors:', error);
     } finally {
@@ -51,11 +58,26 @@ export default function VendorsScreen() {
   };
 
   const handleVendorPress = (vendorId: string) => {
+    // Could navigate to /brands/[slug] when you have slug from API
     console.log('Vendor pressed:', vendorId);
   };
 
   const featuredVendors = filteredVendors.filter((v) => v.is_featured);
   const regularVendors = filteredVendors.filter((v) => !v.is_featured);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Brands</Text>
+          <Text style={styles.headerSubtitle}>Discover amazing brands</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading brands...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -176,6 +198,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
     marginBottom: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
   },
   emptyState: {
     alignItems: 'center',

@@ -20,8 +20,7 @@ A modern React Native e-commerce application built with Expo, focused on deals a
 
 ### Technical Features
 - Tab-based navigation with 5 main sections
-- Supabase backend with PostgreSQL database
-- Real-time data synchronization
+- DealRush backend API (`https://backend.dealrushs.com`)
 - Pull-to-refresh functionality
 - Search and filter capabilities
 - Responsive design with red theme
@@ -33,29 +32,19 @@ A modern React Native e-commerce application built with Expo, focused on deals a
 npm install
 ```
 
-2. Configure environment variables:
-Create a `.env` file in the root directory:
-```
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-3. Run the development server:
+2. Run the development server:
 ```bash
 npm run dev
 ```
 
-## Database Schema
+## Backend API
 
-The app uses Supabase with the following tables:
-- `vendors` - Brand/vendor information
-- `products` - Product catalog
-- `deals` - Active deals with types and discounts
-- `reels` - Video content linked to products
-- `live_shopping_sessions` - Live shopping events
-- `live_shopping_products` - Products featured in live sessions
-
-Sample data is included to demonstrate functionality.
+The app uses the DealRush backend API. See `DEALRUSH_BACKEND_API.md` for full endpoint reference. Key endpoints:
+- **Home** – `GET /api/home-page` (banners, deal sections)
+- **Deals** – `GET /api/products/deals/*` (day-of-deals, heavy-discount, etc.)
+- **Reels** – `GET /api/products/reels`
+- **Vendors** – `GET /api/public/vendors`
+- **Product detail** – `GET /api/products/{id}` or `GET /api/products/slug/{slug}`
 
 ## Theme
 
@@ -82,7 +71,7 @@ components/
   LiveSessionCard.tsx # Live session card
   VendorCard.tsx     # Vendor/brand card
 lib/
-  supabase.ts        # Supabase client configuration
+  api.ts             # DealRush backend API client
 types/
   database.ts        # TypeScript type definitions
 ```

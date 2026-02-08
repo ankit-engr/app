@@ -11,8 +11,55 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Heart, Share2, ShoppingCart, Star, Truck, Shield } from 'lucide-react-native';
-import { supabase } from '@/lib/supabase';
+import { getProductById, getProductBySlug, getImageUrl } from '@/lib/api';
 import { ProductWithDeal } from '@/types/database';
+import ProductImageGallery from '@/components/ProductImageGallery';
+
+function mapDetailToProductWithDeal(data: NonNullable<Awaited<ReturnType<typeof getProductById>>>): ProductWithDeal {
+  const p = data.product;
+  const images = (p.product_images ?? []).map((i) => getImageUrl(i.imageUrl));
+  const imageUrl = images[0] || null;
+  const comparePrice = p.comparePrice ?? p.price;
+  const effectivePrice = p.effectivePrice ?? p.price;
+  const discountPct = comparePrice > 0 ? Math.round(((comparePrice - effectivePrice) / comparePrice) * 100) : 0;
+  return {
+    id: p.id,
+    vendor_id: '',
+    name: p.name,
+    description: p.description ?? null,
+    price: p.price,
+    image_url: imageUrl,
+    image_urls: images,
+    stock: p.stock ?? 0,
+    is_active: (p.status ?? 'active') === 'active',
+    created_at: '',
+    deals: discountPct > 0
+      ? [
+          {
+            id: `${p.id}-deal`,
+            product_id: p.id,
+            deal_type: 'discount',
+            discount_percentage: discountPct,
+            discounted_price: effectivePrice,
+            start_date: '',
+            end_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            is_active: true,
+            created_at: '',
+          },
+        ]
+      : [],
+    vendors: p.vendors
+      ? {
+          id: '',
+          name: p.vendors.name,
+          logo_url: p.vendors.logoUrl ? getImageUrl(p.vendors.logoUrl) : null,
+          description: null,
+          is_featured: false,
+          created_at: '',
+        }
+      : { id: '', name: '', logo_url: null, description: null, is_featured: false, created_at: '' },
+  };
+}
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -20,7 +67,7 @@ export default function ProductDetailScreen() {
   const [product, setProduct] = useState<ProductWithDeal | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
-  const [imageIndex, setImageIndex] = useState(0);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   useEffect(() => {
     fetchProduct();
@@ -30,15 +77,14 @@ export default function ProductDetailScreen() {
     if (!id) return;
 
     try {
-      const { data } = await supabase
-        .from('products')
-        .select('*, deals(*), vendors(*)')
-        .eq('id', id)
-        .maybeSingle();
-
-      setProduct((data as ProductWithDeal) || null);
+      let data = await getProductById(id);
+      if (!data && id && !id.includes('-')) {
+        data = await getProductBySlug(id);
+      }
+      setProduct(data ? mapDetailToProductWithDeal(data) : null);
     } catch (error) {
       console.error('Error fetching product:', error);
+      setProduct(null);
     } finally {
       setLoading(false);
     }
@@ -72,9 +118,12 @@ export default function ProductDetailScreen() {
   const deal = product.deals?.[0];
   const vendor = product.vendors;
 
-  const images = product.image_urls && product.image_urls.length > 0
-    ? (product.image_urls as string[])
-    : [product.image_url || ''];
+  const images =
+    product.image_urls && product.image_urls.length > 0
+      ? product.image_urls
+      : product.image_url
+        ? [product.image_url]
+        : [];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -93,41 +142,38 @@ export default function ProductDetailScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <View style={styles.imageSection}>
-          <Image
-            source={{ uri: images[imageIndex] }}
-            style={styles.mainImage}
-            defaultSource={require('@/assets/images/icon.png')}
-          />
-          {images.length > 1 && (
-            <View style={styles.imageIndicators}>
-              {images.map((_, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[
-                    styles.imageIndicator,
-                    index === imageIndex && styles.activeIndicator,
-                  ]}
-                  onPress={() => setImageIndex(index)}
-                />
-              ))}
-            </View>
-          )}
-        </View>
+        <ProductImageGallery images={images} initialIndex={0} />
 
         <View style={styles.contentContainer}>
-          {vendor && (
+          {vendor && vendor.name && (
             <View style={styles.vendorSection}>
-              <Image
-                source={{ uri: vendor.logo_url || '' }}
-                style={styles.vendorLogo}
-              />
+              {vendor.logo_url ? (
+                <Image source={{ uri: vendor.logo_url }} style={styles.vendorLogo} />
+              ) : null}
               <Text style={styles.vendorName}>{vendor.name}</Text>
             </View>
           )}
 
           <Text style={styles.productName}>{product.name}</Text>
-          <Text style={styles.productDescription}>{product.description}</Text>
+          
+          {product.description && (
+            <View style={styles.descriptionPreview}>
+              <Text
+                style={styles.productDescription}
+                numberOfLines={descriptionExpanded ? undefined : 2}>
+                {product.description}
+              </Text>
+              {product.description.length > 80 && (
+                <TouchableOpacity
+                  onPress={() => setDescriptionExpanded(!descriptionExpanded)}
+                  style={styles.seeMoreBtn}>
+                  <Text style={styles.seeMoreText}>
+                    {descriptionExpanded ? 'See less' : 'See more'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           <View style={styles.ratingSection}>
             <View style={styles.stars}>
@@ -150,13 +196,13 @@ export default function ProductDetailScreen() {
                   <Text style={styles.discountText}>{deal.discount_percentage}% OFF</Text>
                 </View>
                 <View style={styles.priceRow}>
-                  <Text style={styles.originalPrice}>${product.price.toFixed(2)}</Text>
-                  <Text style={styles.finalPrice}>${deal.discounted_price.toFixed(2)}</Text>
+                  <Text style={styles.originalPrice}>₹{product.price.toFixed(0)}</Text>
+                  <Text style={styles.finalPrice}>₹{deal.discounted_price.toFixed(0)}</Text>
                 </View>
                 <Text style={styles.dealType}>{deal.deal_type.replace(/_/g, ' ').toUpperCase()}</Text>
               </View>
             ) : (
-              <Text style={styles.finalPrice}>${product.price.toFixed(2)}</Text>
+              <Text style={styles.finalPrice}>₹{product.price.toFixed(0)}</Text>
             )}
           </View>
 
@@ -245,34 +291,6 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  imageSection: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  mainImage: {
-    width: '100%',
-    height: 300,
-    resizeMode: 'cover',
-  },
-  imageIndicators: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-  },
-  imageIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#D1D5DB',
-  },
-  activeIndicator: {
-    backgroundColor: '#DC2626',
-    width: 24,
-  },
   contentContainer: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -300,13 +318,24 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  descriptionPreview: {
+    marginBottom: 16,
   },
   productDescription: {
     fontSize: 14,
     color: '#6B7280',
     lineHeight: 20,
-    marginBottom: 16,
+  },
+  seeMoreBtn: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  seeMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#DC2626',
   },
   ratingSection: {
     flexDirection: 'row',

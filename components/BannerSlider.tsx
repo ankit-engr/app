@@ -1,68 +1,69 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, FlatList, Dimensions, ViewToken } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
 
-interface Banner {
+export interface Banner {
   id: string;
-  image: string;
+  image: any;
   title: string;
   subtitle: string;
-  color: string;
+  color?: string;
 }
 
-const BANNERS: Banner[] = [
+const DEFAULT_BANNERS: Banner[] = [
   {
     id: '1',
-    image: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=1000',
-    title: 'Deal of the Day',
-    subtitle: 'Up to 40% off on tech products',
-    color: '#DC2626',
+    image: require('@/assets/images/hero_banner_super_sale_1770529956779.png'),
+    title: 'Super Sale',
+    subtitle: 'High-end deals for you',
   },
   {
     id: '2',
-    image: 'https://images.pexels.com/photos/1055691/pexels-photo-1055691.jpeg?auto=compress&cs=tinysrgb&w=1000',
-    title: 'Summer Collection',
-    subtitle: 'Fresh styles for the season',
-    color: '#DC2626',
+    image: require('@/assets/images/hourly_deals_banner_1770529970822.png'),
+    title: 'Hourly Deals',
+    subtitle: 'Limited time offers',
   },
   {
     id: '3',
-    image: 'https://images.pexels.com/photos/3762879/pexels-photo-3762879.jpeg?auto=compress&cs=tinysrgb&w=1000',
-    title: 'Beauty Essentials',
-    subtitle: 'Premium skincare collection',
-    color: '#DC2626',
+    image: require('@/assets/images/electronics_gaming_banner_1770529989726.png'),
+    title: 'Gaming Zone',
+    subtitle: 'Level up your gear',
   },
   {
     id: '4',
-    image: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=1000',
-    title: 'Home Decor',
-    subtitle: 'Transform your space',
-    color: '#DC2626',
+    image: require('@/assets/images/fashion_trends_banner_1770530008544.png'),
+    title: 'Fashion Trends',
+    subtitle: 'Stay stylish and chic',
   },
 ];
 
 const { width } = Dimensions.get('window');
+const BANNER_HEIGHT = 200;
 
-export default function BannerSlider() {
+interface BannerSliderProps {
+  banners?: any[];
+}
+
+export default function BannerSlider({ banners }: BannerSliderProps) {
+  // If banners are passed (API data), map them to match Banner interface if needed.
+  // But here we assume API banners have 'image' as uri string.
+  // We need to handle both string URI and require() number.
+
+  const BANNERS = banners && banners.length > 0 ? banners : DEFAULT_BANNERS;
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
-  const scrollIntervalRef = useRef<NodeJS.Timeout>();
+  const scrollIntervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     scrollIntervalRef.current = setInterval(() => {
       const nextIndex = (activeIndex + 1) % BANNERS.length;
-      flatListRef.current?.scrollToIndex({
-        index: nextIndex,
-        animated: true,
-      });
+      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
     }, 5000);
-
     return () => {
-      if (scrollIntervalRef.current) {
-        clearInterval(scrollIntervalRef.current);
-      }
+      if (scrollIntervalRef.current) clearInterval(scrollIntervalRef.current);
     };
-  }, [activeIndex]);
+  }, [activeIndex, BANNERS.length]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems.length > 0 && viewableItems[0].index !== null) {
@@ -70,32 +71,34 @@ export default function BannerSlider() {
     }
   });
 
-  const handlePrevious = () => {
-    const newIndex = (activeIndex - 1 + BANNERS.length) % BANNERS.length;
-    flatListRef.current?.scrollToIndex({
-      index: newIndex,
-      animated: true,
-    });
+  const handlePrev = () => {
+    const next = (activeIndex - 1 + BANNERS.length) % BANNERS.length;
+    flatListRef.current?.scrollToIndex({ index: next, animated: true });
   };
-
   const handleNext = () => {
-    const newIndex = (activeIndex + 1) % BANNERS.length;
-    flatListRef.current?.scrollToIndex({
-      index: newIndex,
-      animated: true,
-    });
+    const next = (activeIndex + 1) % BANNERS.length;
+    flatListRef.current?.scrollToIndex({ index: next, animated: true });
   };
 
-  const renderBanner = ({ item }: { item: Banner }) => (
-    <View style={[styles.bannerContainer, { width }]}>
-      <Image source={{ uri: item.image }} style={styles.bannerImage} />
-      <View style={styles.overlayGradient} />
-      <View style={styles.bannerContent}>
-        <Text style={styles.bannerTitle}>{item.title}</Text>
-        <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
+  const renderBanner = ({ item }: { item: any }) => {
+    const source = typeof item.image === 'string' ? { uri: item.image } : item.image;
+    return (
+      <View style={[styles.bannerWrap, { width }]}>
+        <Image source={source} style={styles.bannerImage} />
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.7)']}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.bannerContent}>
+          <Text style={styles.bannerTitle}>{item.title}</Text>
+          <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
+          <View style={styles.ctaPill}>
+            <Text style={styles.ctaText}>Shop now</Text>
+          </View>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -107,29 +110,24 @@ export default function BannerSlider() {
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
-        viewabilityConfig={{
-          itemVisiblePercentThreshold: 50,
-        }}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
         onViewableItemsChanged={onViewableItemsChanged.current}
       />
-
-      <View style={styles.navigation}>
+      <View style={styles.footer}>
         <View style={styles.dots}>
-          {BANNERS.map((_, index) => (
+          {BANNERS.map((_, i) => (
             <View
-              key={index}
-              style={[styles.dot, index === activeIndex && styles.activeDot]}
+              key={i}
+              style={[styles.dot, i === activeIndex && styles.dotActive]}
             />
           ))}
         </View>
-
-        <View style={styles.buttons}>
-          <View style={styles.navButton} onTouchEnd={handlePrevious}>
-            <ChevronLeft size={20} color="#FFFFFF" />
+        <View style={styles.nav}>
+          <View style={styles.navBtn} onTouchEnd={handlePrev}>
+            <ChevronLeft size={22} color="#fff" />
           </View>
-          <View style={styles.navButton} onTouchEnd={handleNext}>
-            <ChevronRight size={20} color="#FFFFFF" />
+          <View style={styles.navBtn} onTouchEnd={handleNext}>
+            <ChevronRight size={22} color="#fff" />
           </View>
         </View>
       </View>
@@ -139,81 +137,92 @@ export default function BannerSlider() {
 
 const styles = StyleSheet.create({
   container: {
-    height: 280,
-    width: '100%',
-    position: 'relative',
-    marginBottom: 24,
-  },
-  bannerContainer: {
-    height: 280,
-    position: 'relative',
+    height: BANNER_HEIGHT,
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 8,
+    borderRadius: 0,
     overflow: 'hidden',
+    backgroundColor: '#1f2937',
+    borderTopWidth: 6,
+    borderTopColor: '#F1F5F9',
+    borderBottomWidth: 6,
+    borderBottomColor: '#F1F5F9',
+  },
+  bannerWrap: {
+    height: BANNER_HEIGHT,
+    position: 'relative',
   },
   bannerImage: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  overlayGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-  },
   bannerContent: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    padding: 20,
   },
   bannerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#fff',
     marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   bannerSubtitle: {
-    fontSize: 14,
-    color: '#F3F4F6',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.9)',
+    marginBottom: 12,
   },
-  navigation: {
+  ctaPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  ctaText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  footer: {
     position: 'absolute',
-    bottom: 16,
+    bottom: 12,
     left: 16,
     right: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    zIndex: 10,
   },
   dots: {
     flexDirection: 'row',
     gap: 6,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
-  activeDot: {
+  dotActive: {
+    width: 20,
     backgroundColor: '#DC2626',
-    width: 24,
   },
-  buttons: {
+  nav: {
     flexDirection: 'row',
     gap: 8,
   },
-  navButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(220, 38, 38, 0.9)',
+  navBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
   },

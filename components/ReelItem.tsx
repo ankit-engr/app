@@ -1,74 +1,233 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions } from 'react-native';
-import { Play, Pause, Heart, ShoppingBag } from 'lucide-react-native';
-import { ReelWithDetails } from '@/types/database';
+import { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  Dimensions,
+  Animated as RNAnimated,
+} from 'react-native';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { Heart, ShoppingCart, Plus, Minus, Volume2, VolumeX } from 'lucide-react-native';
+import { ReelListItem } from '@/types/database';
+import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width, height } = Dimensions.get('window');
 
 interface ReelItemProps {
-  item: ReelWithDetails;
+  item: ReelListItem;
   isActive: boolean;
 }
 
 export default function ReelItem({ item, isActive }: ReelItemProps) {
-  const [isPlaying, setIsPlaying] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [quantity, setQuantity] = useState(0);
+  const [showProductCard, setShowProductCard] = useState(true);
+  const videoRef = useRef<Video>(null);
+  const router = useRouter();
+  const slideAnim = useRef(new RNAnimated.Value(0)).current;
+
+  useEffect(() => {
+    if (isActive && videoRef.current) {
+      videoRef.current.playAsync();
+    } else if (videoRef.current) {
+      videoRef.current.pauseAsync();
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    RNAnimated.spring(slideAnim, {
+      toValue: showProductCard ? 0 : 150,
+      useNativeDriver: true,
+      friction: 8,
+    }).start();
+  }, [showProductCard]);
+
+  const handleProductPress = () => {
+    if (item.products) {
+      router.push(`/(tabs)/product/${item.products.id}`);
+    }
+  };
+
+  const incrementQuantity = () => {
+    setQuantity((prev) => prev + 1);
+  };
+
+  const decrementQuantity = () => {
+    setQuantity((prev) => Math.max(0, prev - 1));
+  };
+
+  const fallbackImage = 'https://images.pexels.com/photos/264905/pexels-photo-264905.jpeg?auto=compress&cs=tinysrgb&w=600';
+  const hasVideo = !!item.video_url;
+
+  const discount = item.products?.deals?.[0]?.discount_percentage ?? 0;
+  const originalPrice = item.products?.price ?? 0;
+  const discountedPrice = item.products?.deals?.[0]?.discounted_price ?? item.products?.price ?? 0;
 
   return (
     <View style={styles.container}>
-      <Image
-        source={{ uri: item.thumbnail_url || 'https://images.pexels.com/photos/264905/pexels-photo-264905.jpeg?auto=compress&cs=tinysrgb&w=600' }}
-        style={styles.video}
+      {hasVideo ? (
+        <Video
+          ref={videoRef}
+          source={{ uri: item.video_url! }}
+          posterSource={item.thumbnail_url ? { uri: item.thumbnail_url } : { uri: fallbackImage }}
+          posterStyle={{ resizeMode: 'cover' }}
+          usePoster
+          style={styles.media}
+          resizeMode={ResizeMode.COVER}
+          isLooping
+          isMuted={isMuted}
+          shouldPlay={isActive}
+        />
+      ) : (
+        <Image
+          source={{ uri: item.thumbnail_url || fallbackImage }}
+          style={styles.media}
+          resizeMode="cover"
+        />
+      )}
+
+      {/* Gradient Overlays */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.6)', 'transparent']}
+        style={styles.topGradient}
+      />
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.8)']}
+        style={styles.bottomGradient}
       />
 
+      {/* Mute/Unmute Button - Top Left */}
       <TouchableOpacity
-        style={styles.playButton}
-        onPress={() => setIsPlaying(!isPlaying)}>
-        {!isPlaying ? (
-          <Play size={48} color="#FFFFFF" fill="#FFFFFF" />
+        style={styles.muteButton}
+        onPress={() => setIsMuted(!isMuted)}
+        activeOpacity={0.8}>
+        {isMuted ? (
+          <VolumeX size={24} color="#FFFFFF" strokeWidth={2.5} />
         ) : (
-          <Pause size={48} color="#FFFFFF" fill="#FFFFFF" />
+          <Volume2 size={24} color="#FFFFFF" strokeWidth={2.5} />
         )}
       </TouchableOpacity>
 
-      <View style={styles.overlay}>
-        <View style={styles.sideActions}>
+      {/* Product Card - Top Right */}
+      {item.products && (
+        <RNAnimated.View
+          style={[
+            styles.productCard,
+            {
+              transform: [{ translateX: slideAnim }],
+            },
+          ]}>
           <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setIsLiked(!isLiked)}>
-            <Heart
-              size={32}
-              color={isLiked ? '#DC2626' : '#FFFFFF'}
-              fill={isLiked ? '#DC2626' : 'transparent'}
+            onPress={handleProductPress}
+            activeOpacity={0.9}
+            style={styles.productCardContent}>
+            <Image
+              source={{ uri: item.products.image_url || item.thumbnail_url || '' }}
+              style={styles.productImage}
+              resizeMode="cover"
             />
-            <Text style={styles.actionText}>{item.likes_count}</Text>
+            <View style={styles.productDetails}>
+              <Text style={styles.productName} numberOfLines={2}>
+                {item.products.name}
+              </Text>
+              <View style={styles.priceRow}>
+                {discount > 0 ? (
+                  <>
+                    <Text style={styles.productPrice}>₹{discountedPrice.toFixed(0)}</Text>
+                    <Text style={styles.originalPrice}>₹{originalPrice.toFixed(0)}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.productPrice}>₹{originalPrice.toFixed(0)}</Text>
+                )}
+              </View>
+              {discount > 0 && (
+                <View style={styles.discountBadge}>
+                  <Text style={styles.discountText}>{discount}% OFF</Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
 
-          {item.products && (
-            <TouchableOpacity style={styles.actionButton}>
-              <ShoppingBag size={32} color="#FFFFFF" />
-              <Text style={styles.actionText}>Shop</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+          {/* Quantity Controls */}
+          <View style={styles.quantityControls}>
+            {quantity === 0 ? (
+              <TouchableOpacity
+                style={styles.addToCartBtn}
+                onPress={incrementQuantity}
+                activeOpacity={0.8}>
+                <ShoppingCart size={18} color="#FFFFFF" strokeWidth={2.5} />
+                <Text style={styles.addToCartText}>Add</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.quantityAdjuster}>
+                <TouchableOpacity
+                  style={styles.quantityBtn}
+                  onPress={decrementQuantity}
+                  activeOpacity={0.8}>
+                  <Minus size={16} color="#FFFFFF" strokeWidth={3} />
+                </TouchableOpacity>
+                <View style={styles.quantityDisplay}>
+                  <Text style={styles.quantityText}>{quantity}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.quantityBtn}
+                  onPress={incrementQuantity}
+                  activeOpacity={0.8}>
+                  <Plus size={16} color="#FFFFFF" strokeWidth={3} />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </RNAnimated.View>
+      )}
 
-        <View style={styles.bottomInfo}>
-          <Text style={styles.title}>{item.title}</Text>
-          {item.description && (
-            <Text style={styles.description} numberOfLines={2}>
-              {item.description}
-            </Text>
-          )}
-          {item.products && (
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>{item.products.name}</Text>
-              <Text style={styles.productPrice}>${item.products.price}</Text>
+      {/* Side Actions - Right Side */}
+      <View style={styles.sideActions}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setIsLiked(!isLiked)}
+          activeOpacity={0.8}>
+          <View style={styles.actionIconWrapper}>
+            <Heart
+              size={28}
+              color={isLiked ? '#DC2626' : '#FFFFFF'}
+              fill={isLiked ? '#DC2626' : 'transparent'}
+              strokeWidth={2}
+            />
+          </View>
+          <Text style={styles.actionText}>{item.likes_count || 0}</Text>
+        </TouchableOpacity>
+
+        {item.products && (
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleProductPress}
+            activeOpacity={0.8}>
+            <View style={styles.actionIconWrapper}>
+              <ShoppingCart size={28} color="#FFFFFF" strokeWidth={2} />
             </View>
-          )}
-          {item.vendors && (
-            <Text style={styles.vendorName}>by {item.vendors.name}</Text>
-          )}
-        </View>
+            <Text style={styles.actionText}>Shop</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Bottom Info */}
+      <View style={styles.bottomInfo}>
+        {item.vendors && (
+          <Text style={styles.vendorName}>@{item.vendors.name}</Text>
+        )}
+        <Text style={styles.title} numberOfLines={2}>
+          {item.title}
+        </Text>
+        {item.description && (
+          <Text style={styles.description} numberOfLines={2}>
+            {item.description}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -79,82 +238,202 @@ const styles = StyleSheet.create({
     width,
     height,
     backgroundColor: '#000000',
+    position: 'relative',
   },
-  video: {
+  media: {
     width: '100%',
     height: '100%',
   },
-  playButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -24 }, { translateY: -24 }],
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlay: {
+  topGradient: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    height: 200,
+  },
+  bottomGradient: {
+    position: 'absolute',
     bottom: 0,
+    left: 0,
+    right: 0,
+    height: 250,
+  },
+  muteButton: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  productCard: {
+    position: 'absolute',
+    top: 60,
+    right: 16,
+    width: 140,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  productCardContent: {
+    width: '100%',
+  },
+  productImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#F3F4F6',
+  },
+  productDetails: {
+    padding: 10,
+  },
+  productName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 6,
+    lineHeight: 16,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  productPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  originalPrice: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  discountBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  discountText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  quantityControls: {
+    width: '100%',
+    padding: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  addToCartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#DC2626',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  addToCartText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  quantityAdjuster: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  quantityBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  quantityDisplay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quantityText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   sideActions: {
     position: 'absolute',
     right: 16,
-    bottom: 100,
+    bottom: 140,
     alignItems: 'center',
+    gap: 20,
   },
   actionButton: {
     alignItems: 'center',
-    marginBottom: 24,
+    gap: 4,
+  },
+  actionIconWrapper: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   actionText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    marginTop: 4,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   bottomInfo: {
-    padding: 16,
-    paddingBottom: 100,
-    backgroundColor: 'linear-gradient(transparent, rgba(0, 0, 0, 0.8))',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 8,
-  },
-  description: {
-    fontSize: 14,
-    color: '#E5E7EB',
-    marginBottom: 12,
-  },
-  productInfo: {
-    backgroundColor: 'rgba(220, 38, 38, 0.9)',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  productPrice: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    position: 'absolute',
+    bottom: 80,
+    left: 16,
+    right: 180,
   },
   vendorName: {
-    fontSize: 12,
-    color: '#D1D5DB',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 6,
+    lineHeight: 22,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  description: {
+    fontSize: 13,
+    color: '#E5E7EB',
+    lineHeight: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 });

@@ -71,6 +71,18 @@ export interface ReelWithDetails extends Reel {
   vendors: Vendor | null;
 }
 
+/** Reel item for display (from API reels = product list, or full reel) */
+export interface ReelListItem {
+  id: string;
+  thumbnail_url: string | null;
+  video_url?: string | null;
+  title: string;
+  description: string | null;
+  likes_count: number;
+  products: ProductWithDeal | null;
+  vendors: Vendor | null;
+}
+
 export interface LiveSessionWithVendor extends LiveShoppingSession {
   vendors: Vendor;
 }
