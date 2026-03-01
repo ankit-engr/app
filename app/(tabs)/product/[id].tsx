@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -10,68 +11,77 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Heart, Share2, ShoppingCart, Star, Truck, Shield } from 'lucide-react-native';
-import { getProductById, getProductBySlug, getImageUrl } from '@/lib/api';
-import { ProductWithDeal } from '@/types/database';
+import { ArrowLeft, Heart, Share2, ShoppingCart, Star } from 'lucide-react-native';
+import { getProductById, getProductBySlug, getImageUrl, type ProductDetailResponse } from '@/lib/api';
 import ProductImageGallery from '@/components/ProductImageGallery';
 
-function mapDetailToProductWithDeal(data: NonNullable<Awaited<ReturnType<typeof getProductById>>>): ProductWithDeal {
-  const p = data.product;
-  const images = (p.product_images ?? []).map((i) => getImageUrl(i.imageUrl));
-  const imageUrl = images[0] || null;
-  const comparePrice = p.comparePrice ?? p.price;
-  const effectivePrice = p.effectivePrice ?? p.price;
-  const discountPct = comparePrice > 0 ? Math.round(((comparePrice - effectivePrice) / comparePrice) * 100) : 0;
-  return {
-    id: p.id,
-    vendor_id: '',
-    name: p.name,
-    description: p.description ?? null,
-    price: p.price,
-    image_url: imageUrl,
-    image_urls: images,
-    stock: p.stock ?? 0,
-    is_active: (p.status ?? 'active') === 'active',
-    created_at: '',
-    deals: discountPct > 0
-      ? [
-          {
-            id: `${p.id}-deal`,
-            product_id: p.id,
-            deal_type: 'discount',
-            discount_percentage: discountPct,
-            discounted_price: effectivePrice,
-            start_date: '',
-            end_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            is_active: true,
-            created_at: '',
-          },
-        ]
-      : [],
-    vendors: p.vendors
-      ? {
-          id: '',
-          name: p.vendors.name,
-          logo_url: p.vendors.logoUrl ? getImageUrl(p.vendors.logoUrl) : null,
-          description: null,
-          is_featured: false,
-          created_at: '',
-        }
-      : { id: '', name: '', logo_url: null, description: null, is_featured: false, created_at: '' },
+type ProductDetailData = NonNullable<ProductDetailResponse['data']>;
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function formatTwo(n: number) {
+  return String(clamp(Math.floor(n), 0, 99)).padStart(2, '0');
+}
+
+function extractColorName(label: string): string | null {
+  const clean = label.replace(/\s+/g, ' ').trim();
+  if (!clean) return null;
+  const parts = clean.split(/[-|/]/g).map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts[parts.length - 1] ?? null;
+}
+
+function colorToHex(name: string): string | null {
+  const n = name.toLowerCase().trim();
+  const map: Record<string, string> = {
+    black: '#0B1220',
+    white: '#FFFFFF',
+    red: '#EF4444',
+    blue: '#3B82F6',
+    green: '#22C55E',
+    yellow: '#F59E0B',
+    orange: '#F97316',
+    purple: '#8B5CF6',
+    pink: '#EC4899',
+    gray: '#9CA3AF',
+    grey: '#9CA3AF',
+    silver: '#C0C0C0',
+    gold: '#D4AF37',
+    brown: '#8B5E34',
+    navy: '#1E3A8A',
   };
+  return map[n] ?? null;
 }
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [product, setProduct] = useState<ProductWithDeal | null>(null);
+  const [detail, setDetail] = useState<ProductDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  const dealEndsAtRef = useRef<Date>(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const [, forceTick] = useState(0);
+
+  const images = useMemo(() => {
+    const list = (detail?.product?.product_images ?? [])
+      .map((i) => getImageUrl(i.imageUrl))
+      .filter(Boolean);
+    return list.length > 0 ? list : [];
+  }, [detail?.product?.product_images]);
 
   useEffect(() => {
     fetchProduct();
   }, [id]);
+
+  useEffect(() => {
+    const timer = setInterval(() => forceTick((t) => (t + 1) % 1000000), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchProduct = async () => {
     if (!id) return;
@@ -81,10 +91,13 @@ export default function ProductDetailScreen() {
       if (!data && id && !id.includes('-')) {
         data = await getProductBySlug(id);
       }
-      setProduct(data ? mapDetailToProductWithDeal(data) : null);
+      setDetail(data ?? null);
+      const variants = data?.product?.product_variants ?? [];
+      const defaultVariant = variants.find((v) => v.isDefault) ?? variants[0];
+      setSelectedVariantId(defaultVariant?.id ?? null);
     } catch (error) {
       console.error('Error fetching product:', error);
-      setProduct(null);
+      setDetail(null);
     } finally {
       setLoading(false);
     }
@@ -100,12 +113,12 @@ export default function ProductDetailScreen() {
     );
   }
 
-  if (!product) {
+  if (!detail) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <ArrowLeft size={24} color="#111827" />
+        <View style={styles.simpleHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+            <ArrowLeft size={22} color="#111827" />
           </TouchableOpacity>
         </View>
         <View style={styles.notFoundContainer}>
@@ -115,125 +128,219 @@ export default function ProductDetailScreen() {
     );
   }
 
-  const deal = product.deals?.[0];
-  const vendor = product.vendors;
+  const p = detail.product;
+  const vendorName = p.vendors?.name ?? '';
+  const categoryName = p.categories?.name ?? '';
 
-  const images =
-    product.image_urls && product.image_urls.length > 0
-      ? product.image_urls
-      : product.image_url
-        ? [product.image_url]
-        : [];
+  const comparePrice = p.comparePrice ?? p.price;
+  const effectivePrice = p.effectivePrice ?? p.price;
+  const discountPct =
+    comparePrice > 0 ? Math.round(((comparePrice - effectivePrice) / comparePrice) * 100) : 0;
+
+  const variants = p.product_variants ?? [];
+  const selectedVariant = variants.find((v) => v.id === selectedVariantId) ?? null;
+
+  const endsAt = dealEndsAtRef.current;
+  const remainingMs = Math.max(0, endsAt.getTime() - Date.now());
+  const remainingSec = Math.floor(remainingMs / 1000);
+  const hours = Math.floor(remainingSec / 3600);
+  const minutes = Math.floor((remainingSec % 3600) / 60);
+  const seconds = remainingSec % 60;
+
+  const subtitle = (categoryName || vendorName).toUpperCase();
+  const displayRating = clamp(p.averageRating ?? 4.9, 0, 5);
+  const ratingStars = Math.round(displayRating);
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <ArrowLeft size={24} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Product Details</Text>
-        <TouchableOpacity onPress={() => setIsFavorite(!isFavorite)}>
-          <Heart
-            size={24}
-            color={isFavorite ? '#DC2626' : '#D1D5DB'}
-            fill={isFavorite ? '#DC2626' : 'transparent'}
-          />
-        </TouchableOpacity>
-      </View>
-
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <ProductImageGallery images={images} initialIndex={0} />
+        <View style={styles.hero}>
+          <ProductImageGallery images={images} initialIndex={0} />
 
-        <View style={styles.contentContainer}>
-          {vendor && vendor.name && (
-            <View style={styles.vendorSection}>
-              {vendor.logo_url ? (
-                <Image source={{ uri: vendor.logo_url }} style={styles.vendorLogo} />
+          <View style={styles.heroTopBar}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.heroIconBtn}>
+              <ArrowLeft size={22} color="#111827" />
+            </TouchableOpacity>
+            <View style={styles.heroActions}>
+              <TouchableOpacity
+                onPress={() => Alert.alert('Share', 'Share link coming soon.')}
+                style={styles.heroIconBtn}>
+                <Share2 size={20} color="#111827" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() =>
+                  Alert.alert('Cart', `Added to cart: ${quantity} ${selectedVariant ? `• ${selectedVariant.name}` : ''}`)
+                }
+                style={styles.heroIconBtn}>
+                <ShoppingCart size={20} color="#111827" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {discountPct > 0 ? (
+            <View style={styles.heroBadges}>
+              <View style={styles.badgeRed}>
+                <Text style={styles.badgeRedText}>-{discountPct}% OFF</Text>
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.content}>
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          <Text style={styles.title}>{p.name}</Text>
+
+          <View style={styles.priceBlock}>
+            <View style={styles.priceRowNew}>
+              <Text style={styles.priceNow}>₹{Math.round(effectivePrice)}</Text>
+              {comparePrice > effectivePrice ? (
+                <Text style={styles.priceWas}>₹{Math.round(comparePrice)}</Text>
               ) : null}
-              <Text style={styles.vendorName}>{vendor.name}</Text>
             </View>
-          )}
+            <Text style={styles.priceHint}>LIMITED RELEASE PRICING</Text>
 
-          <Text style={styles.productName}>{product.name}</Text>
-          
-          {product.description && (
-            <View style={styles.descriptionPreview}>
-              <Text
-                style={styles.productDescription}
-                numberOfLines={descriptionExpanded ? undefined : 2}>
-                {product.description}
+            {discountPct > 0 ? (
+              <View style={styles.endsInRow}>
+                <Text style={styles.endsInLabel}>ENDS IN</Text>
+                <View style={styles.timer}>
+                  <View style={styles.timerBox}>
+                    <Text style={styles.timerVal}>{formatTwo(hours)}</Text>
+                  </View>
+                  <Text style={styles.timerSep}>:</Text>
+                  <View style={styles.timerBox}>
+                    <Text style={styles.timerVal}>{formatTwo(minutes)}</Text>
+                  </View>
+                  <Text style={styles.timerSep}>:</Text>
+                  <View style={styles.timerBox}>
+                    <Text style={styles.timerVal}>{formatTwo(seconds)}</Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+          </View>
+
+          {variants.length > 0 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>SELECT OPTION</Text>
+              <View style={styles.swatchRow}>
+                {variants.slice(0, 6).map((v) => {
+                  const colorName = extractColorName(v.name) ?? v.name;
+                  const hex = colorName ? colorToHex(colorName) : null;
+                  const active = v.id === selectedVariantId;
+                  const bg = hex ?? '#F3F4F6';
+                  const textColor = hex ? (hex === '#FFFFFF' ? '#111827' : '#FFFFFF') : '#111827';
+                  return (
+                    <TouchableOpacity
+                      key={v.id}
+                      onPress={() => setSelectedVariantId(v.id)}
+                      style={[styles.swatchWrap, active && styles.swatchWrapActive]}
+                      activeOpacity={0.85}>
+                      <View style={[styles.swatch, { backgroundColor: bg, borderColor: hex ? '#E5E7EB' : '#D1D5DB' }]}>
+                        {!hex ? (
+                          <Text style={[styles.swatchLetter, { color: textColor }]}>
+                            {(colorName ?? 'O').slice(0, 1).toUpperCase()}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {selectedVariant ? (
+                <Text style={styles.selectedVariantText}>{selectedVariant.name}</Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>QUANTITY</Text>
+            <View style={styles.qtyRow}>
+              <TouchableOpacity
+                style={styles.qtyBtn}
+                onPress={() => setQuantity((q) => Math.max(1, q - 1))}
+                activeOpacity={0.8}>
+                <Text style={styles.qtyBtnText}>–</Text>
+              </TouchableOpacity>
+              <View style={styles.qtyVal}>
+                <Text style={styles.qtyValText}>{quantity}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.qtyBtn}
+                onPress={() => setQuantity((q) => Math.min(99, q + 1))}
+                activeOpacity={0.8}>
+                <Text style={styles.qtyBtnText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          {(p.shortDescription || p.description) ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitleItalic}>PRODUCT DESCRIPTION</Text>
+              <Text style={styles.bodyText} numberOfLines={descriptionExpanded ? undefined : 4}>
+                {p.shortDescription ?? p.description ?? ''}
               </Text>
-              {product.description.length > 80 && (
+              {(p.description ?? '').length > 160 ? (
                 <TouchableOpacity
-                  onPress={() => setDescriptionExpanded(!descriptionExpanded)}
-                  style={styles.seeMoreBtn}>
-                  <Text style={styles.seeMoreText}>
-                    {descriptionExpanded ? 'See less' : 'See more'}
-                  </Text>
+                  onPress={() => setDescriptionExpanded((v) => !v)}
+                  style={styles.seeMoreBtn}
+                  activeOpacity={0.85}>
+                  <Text style={styles.seeMoreText}>{descriptionExpanded ? 'See less' : 'See more'}</Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
-          )}
+          ) : null}
 
-          <View style={styles.ratingSection}>
-            <View style={styles.stars}>
-              {[0, 1, 2, 3, 4].map((index) => (
-                <Star
-                  key={index}
-                  size={16}
-                  color="#FCD34D"
-                  fill="#FCD34D"
-                />
-              ))}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitleItalic}>TECHNICAL SPECS</Text>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Vendor</Text>
+              <Text style={styles.specValue}>{vendorName || '—'}</Text>
             </View>
-            <Text style={styles.ratingText}>(142 reviews)</Text>
-          </View>
-
-          <View style={styles.priceSection}>
-            {deal ? (
-              <View style={styles.priceWithDeal}>
-                <View style={styles.discountBadge}>
-                  <Text style={styles.discountText}>{deal.discount_percentage}% OFF</Text>
-                </View>
-                <View style={styles.priceRow}>
-                  <Text style={styles.originalPrice}>₹{product.price.toFixed(0)}</Text>
-                  <Text style={styles.finalPrice}>₹{deal.discounted_price.toFixed(0)}</Text>
-                </View>
-                <Text style={styles.dealType}>{deal.deal_type.replace(/_/g, ' ').toUpperCase()}</Text>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Category</Text>
+              <Text style={styles.specValue}>{categoryName || '—'}</Text>
+            </View>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Material</Text>
+              <Text style={styles.specValue}>{p.material || '—'}</Text>
+            </View>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Weight</Text>
+              <Text style={styles.specValue}>{p.weight || '—'}</Text>
+            </View>
+            <View style={styles.specRow}>
+              <Text style={styles.specLabel}>Stock</Text>
+              <Text style={styles.specValue}>{String(selectedVariant?.stock ?? p.stock ?? '—')}</Text>
+            </View>
+            {selectedVariant?.sku ? (
+              <View style={styles.specRow}>
+                <Text style={styles.specLabel}>SKU</Text>
+                <Text style={styles.specValue}>{selectedVariant.sku}</Text>
               </View>
-            ) : (
-              <Text style={styles.finalPrice}>₹{product.price.toFixed(0)}</Text>
-            )}
+            ) : null}
           </View>
 
-          <View style={styles.featuresSection}>
-            <View style={styles.featureItem}>
-              <Truck size={20} color="#DC2626" />
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>Free Shipping</Text>
-                <Text style={styles.featureSubtitle}>On orders above $50</Text>
+          <View style={styles.section}>
+            <Text style={styles.sectionTitleItalic}>SELLER RATING</Text>
+            <View style={styles.sellerRow}>
+              <View style={styles.sellerStars}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <Star
+                    key={i}
+                    size={14}
+                    color={i < ratingStars ? '#F59E0B' : '#E5E7EB'}
+                    fill={i < ratingStars ? '#F59E0B' : '#E5E7EB'}
+                  />
+                ))}
               </View>
+              <Text style={styles.sellerRatingText}>{displayRating.toFixed(1)}</Text>
+              <Text style={styles.sellerReviewsText}>(— reviews)</Text>
             </View>
-
-            <View style={styles.featureItem}>
-              <Shield size={20} color="#DC2626" />
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>Secure Payment</Text>
-                <Text style={styles.featureSubtitle}>100% safe transactions</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.stockSection}>
-            <Text style={styles.stockLabel}>In Stock</Text>
-            <Text style={styles.stockValue}>{product.stock} items available</Text>
-          </View>
-
-          <View style={styles.descriptionBox}>
-            <Text style={styles.descriptionTitle}>About this product</Text>
-            <Text style={styles.descriptionText}>
-              Premium quality product sourced from {vendor?.name}. Manufactured with high-quality materials and
-              tested for durability. Perfect for your needs with excellent customer support.
+            <Text style={styles.sellerHint}>
+              {vendorName ? `${vendorName} · ` : ''}Official DealRush Authorized Store
             </Text>
           </View>
 
@@ -241,13 +348,27 @@ export default function ProductDetailScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.actionBar}>
-        <TouchableOpacity style={styles.shareButton}>
-          <Share2 size={20} color="#DC2626" />
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          onPress={() => setIsFavorite((v) => !v)}
+          style={styles.favBtn}
+          activeOpacity={0.85}>
+          <Heart
+            size={20}
+            color={isFavorite ? '#DC2626' : '#9CA3AF'}
+            fill={isFavorite ? '#DC2626' : 'transparent'}
+          />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.addToCartButton}>
-          <ShoppingCart size={20} color="#FFFFFF" />
-          <Text style={styles.addToCartText}>Add to Cart</Text>
+        <TouchableOpacity
+          style={styles.ctaBtn}
+          activeOpacity={0.9}
+          onPress={() =>
+            Alert.alert(
+              'Cart',
+              `Added to cart: ${quantity} ${selectedVariant ? `• ${selectedVariant.name}` : ''}`
+            )
+          }>
+          <Text style={styles.ctaText}>ADD TO CART</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -257,22 +378,24 @@ export default function ProductDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#FFFFFF',
   },
-  header: {
+  simpleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
+  iconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
   },
   loadingContainer: {
     flex: 1,
@@ -291,203 +414,330 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  contentContainer: {
+  hero: {
+    position: 'relative',
+    backgroundColor: '#FFFFFF',
+  },
+  heroTopBar: {
+    position: 'absolute',
+    top: 10,
+    left: 16,
+    right: 16,
+    zIndex: 5,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  heroActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  heroIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+  },
+  heroBadges: {
+    position: 'absolute',
+    top: 58,
+    left: 16,
+    zIndex: 5,
+    gap: 8,
+  },
+  badgeDark: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+  },
+  badgeDarkText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
+  badgeRed: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#EF4444',
+  },
+  badgeRedText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
+  content: {
     paddingHorizontal: 16,
     paddingTop: 16,
   },
-  vendorSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  vendorLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: 12,
-  },
-  vendorName: {
-    fontSize: 16,
-    fontWeight: '600',
+  subtitle: {
     color: '#DC2626',
+    fontWeight: '800',
+    fontSize: 12,
+    letterSpacing: 3,
+    marginBottom: 8,
   },
-  productName: {
+  title: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#111827',
+    marginBottom: 10,
+  },
+  priceBlock: {
+    paddingBottom: 14,
+  },
+  priceRowNew: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    marginBottom: 4,
+  },
+  priceNow: {
+    color: '#DC2626',
+    fontSize: 30,
+    fontWeight: '900',
+  },
+  priceWas: {
+    color: '#9CA3AF',
+    fontSize: 16,
+    textDecorationLine: 'line-through',
+    paddingBottom: 4,
+  },
+  priceHint: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '700',
+    letterSpacing: 0.8,
     marginBottom: 12,
   },
-  descriptionPreview: {
-    marginBottom: 16,
+  endsInRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  productDescription: {
+  endsInLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: 0.8,
+  },
+  timer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timerBox: {
+    minWidth: 34,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  timerVal: {
+    fontWeight: '900',
+    color: '#EF4444',
     fontSize: 14,
+  },
+  timerSep: {
+    fontWeight: '900',
+    color: '#EF4444',
+    fontSize: 14,
+    paddingBottom: 2,
+  },
+  section: {
+    marginTop: 18,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#111827',
+    letterSpacing: 0.9,
+    marginBottom: 10,
+  },
+  sectionTitleItalic: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#111827',
+    letterSpacing: 1.1,
+    fontStyle: 'italic',
+    marginBottom: 10,
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  swatchWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  swatchWrapActive: {
+    borderColor: '#111827',
+  },
+  swatch: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  swatchLetter: {
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  selectedVariantText: {
+    marginTop: 10,
     color: '#6B7280',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  qtyBtn: {
+    width: 44,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qtyBtnText: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#DC2626',
+  },
+  qtyVal: {
+    minWidth: 44,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  qtyValText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginTop: 20,
+  },
+  bodyText: {
+    fontSize: 14,
     lineHeight: 20,
+    color: '#4B5563',
   },
   seeMoreBtn: {
-    marginTop: 6,
+    marginTop: 8,
     alignSelf: 'flex-start',
   },
   seeMoreText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '800',
     color: '#DC2626',
   },
-  ratingSection: {
+  specRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  stars: {
-    flexDirection: 'row',
-    gap: 4,
-    marginRight: 12,
-  },
-  ratingText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  priceSection: {
-    marginBottom: 24,
-    paddingBottom: 24,
+    justifyContent: 'space-between',
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#F3F4F6',
   },
-  priceWithDeal: {
-    gap: 12,
-  },
-  discountBadge: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    alignSelf: 'flex-start',
-  },
-  discountText: {
-    fontSize: 14,
+  specLabel: {
+    fontSize: 12,
+    color: '#6B7280',
     fontWeight: '700',
-    color: '#DC2626',
   },
-  priceRow: {
+  specValue: {
+    fontSize: 12,
+    color: '#111827',
+    fontWeight: '800',
+    textAlign: 'right',
+    maxWidth: '62%',
+  },
+  sellerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
+    marginBottom: 6,
   },
-  originalPrice: {
-    fontSize: 16,
-    color: '#9CA3AF',
-    textDecorationLine: 'line-through',
-  },
-  finalPrice: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#DC2626',
-  },
-  dealType: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  featuresSection: {
-    gap: 16,
-    marginBottom: 24,
-  },
-  featureItem: {
+  sellerStars: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    padding: 12,
-    borderRadius: 8,
+    gap: 3,
   },
-  featureContent: {
-    flex: 1,
+  sellerRatingText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#EF4444',
   },
-  featureTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 2,
-  },
-  featureSubtitle: {
+  sellerReviewsText: {
     fontSize: 12,
     color: '#6B7280',
-  },
-  stockSection: {
-    backgroundColor: '#ECFDF5',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#BBEAD5',
-  },
-  stockLabel: {
-    fontSize: 12,
-    color: '#047857',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  stockValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#047857',
-  },
-  descriptionBox: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 24,
-  },
-  descriptionTitle: {
-    fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
   },
-  descriptionText: {
-    fontSize: 14,
+  sellerHint: {
+    fontSize: 12,
     color: '#6B7280',
-    lineHeight: 20,
+    fontWeight: '700',
   },
-  actionBar: {
+  bottomBar: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    paddingTop: 12,
+    paddingBottom: 14,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
   },
-  shareButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
+  favBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
   },
-  addToCartButton: {
+  ctaBtn: {
     flex: 1,
+    height: 46,
     backgroundColor: '#DC2626',
-    borderRadius: 8,
-    flexDirection: 'row',
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    height: 48,
   },
-  addToCartText: {
-    fontSize: 16,
-    fontWeight: '700',
+  ctaText: {
     color: '#FFFFFF',
+    fontWeight: '900',
+    letterSpacing: 1.0,
+    fontSize: 14,
   },
   bottomPadding: {
-    height: 20,
+    height: 26,
   },
 });

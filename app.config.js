@@ -1,10 +1,10 @@
 export default {
   expo: {
-    name: 'bolt-expo-nativewind',
-    slug: 'bolt-expo-nativewind',
+    name: 'DealRush',
+    slug: 'dealrush',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/images/icon.png',
+    icon: './assets/images/logo.png',
     scheme: 'myapp',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
@@ -20,5 +20,17 @@ export default {
     experiments: {
       typedRoutes: true,
     },
+    android: {
+      package: "com.dealrush.app",
+      adaptiveIcon: {
+        foregroundImage: "./assets/images/logo.png",
+        backgroundColor: "#ffffff"
+      }
+    },
+    extra: {
+      eas: {
+        projectId: "2e9fe7d9-24b2-44f6-9024-821f30de3bf7"
+      }
+    }
   },
 };
