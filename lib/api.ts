@@ -11,6 +11,11 @@ export function getImageUrl(path: string | null | undefined): string {
   return `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+export interface GuestCartSyncItem {
+  productId: string;
+  quantity: number;
+}
+
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
   const res = await fetch(url, {
@@ -89,6 +94,25 @@ export interface HomePageData {
 export async function getHomePage(): Promise<HomePageData> {
   const res = await fetchApi<{ success: boolean; data: HomePageData }>('/api/home-page');
   return res.data || {};
+}
+
+export async function syncGuestCartToDatabase(
+  items: GuestCartSyncItem[],
+  authToken?: string
+): Promise<boolean> {
+  if (items.length === 0) return true;
+
+  try {
+    await fetchApi('/api/users/cart/sync', {
+      method: 'POST',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+      body: JSON.stringify({ items }),
+    });
+    return true;
+  } catch (error) {
+    console.warn('Guest cart sync skipped:', error);
+    return false;
+  }
 }
 
 // --- Products & Deals ---

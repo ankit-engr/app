@@ -8,6 +8,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Delete, Zap } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 45;
@@ -22,6 +23,7 @@ const KEYS = [
 export default function VerifyEmailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { login } = useAppState();
   const { email } = useLocalSearchParams<{ email: string }>();
   const displayEmail = email || 'user@example.com';
   const [code, setCode] = useState<string[]>([]);
@@ -47,8 +49,9 @@ export default function VerifyEmailScreen() {
     setCountdown(RESEND_SECONDS);
   };
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     if (code.length < CODE_LENGTH) return;
+    await login(displayEmail);
     router.replace('/(tabs)');
   };
 

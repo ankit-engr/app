@@ -24,10 +24,12 @@ import {
 } from '@/lib/api';
 import NoInternetScreen from '@/components/NoInternetScreen';
 import { SkeletonBanner, SkeletonSection } from '@/components/SkeletonLoaders';
+import { useAppState } from '@/contexts/AppStateContext';
 
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { isLoggedIn } = useAppState();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
@@ -159,9 +161,12 @@ export default function HomeScreen() {
             <View style={styles.headerContent}>
               <Text style={styles.logo}>DEALRUSH</Text>
               <View style={styles.headerIcons}>
-                <TouchableOpacity style={styles.loginBtn} activeOpacity={0.85} onPress={() => router.push('/login')}>
+                <TouchableOpacity
+                  style={styles.loginBtn}
+                  activeOpacity={0.85}
+                  onPress={() => router.push(isLoggedIn ? '/(tabs)/profile' : '/login')}>
                   <User size={15} color="#FFFFFF" strokeWidth={2.2} />
-                  <Text style={styles.loginBtnText}>Login</Text>
+                  <Text style={styles.loginBtnText}>{isLoggedIn ? 'Profile' : 'Login'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.iconBtn, styles.iconBtnDark]} activeOpacity={0.8}>
                   <ShoppingCart size={20} color="#FFFFFF" strokeWidth={2.2} />
@@ -196,9 +201,12 @@ export default function HomeScreen() {
           <View style={styles.headerContent}>
             <Text style={styles.logo}>DEALRUSH</Text>
             <View style={styles.headerIcons}>
-              <TouchableOpacity style={styles.loginBtn} activeOpacity={0.85} onPress={() => router.push('/login')}>
+              <TouchableOpacity
+                style={styles.loginBtn}
+                activeOpacity={0.85}
+                onPress={() => router.push(isLoggedIn ? '/(tabs)/profile' : '/login')}>
                 <User size={15} color="#FFFFFF" strokeWidth={2.2} />
-                <Text style={styles.loginBtnText}>Login</Text>
+                <Text style={styles.loginBtnText}>{isLoggedIn ? 'Profile' : 'Login'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.iconBtn, styles.iconBtnDark]} activeOpacity={0.8} onPress={() => router.push('/(tabs)/cart')}>
                 <ShoppingCart size={20} color="#FFFFFF" strokeWidth={2.2} />

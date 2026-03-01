@@ -13,6 +13,7 @@ import { Heart, ShoppingCart, Plus, Minus, Volume2, VolumeX } from 'lucide-react
 import { ReelListItem } from '@/types/database';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAppState } from '@/contexts/AppStateContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,6 +30,7 @@ export default function ReelItem({ item, isActive }: ReelItemProps) {
   const videoRef = useRef<Video>(null);
   const router = useRouter();
   const slideAnim = useRef(new RNAnimated.Value(0)).current;
+  const { addToCart, cartItems, updateCartItemQuantity } = useAppState();
 
   useEffect(() => {
     if (isActive && videoRef.current) {
@@ -52,12 +54,31 @@ export default function ReelItem({ item, isActive }: ReelItemProps) {
     }
   };
 
+  const cartItemId = item.products?.id ?? null;
+
+  useEffect(() => {
+    if (!cartItemId) return;
+    const existing = cartItems.find((p) => p.id === cartItemId);
+    setQuantity(existing?.quantity ?? 0);
+  }, [cartItemId, cartItems]);
+
   const incrementQuantity = () => {
-    setQuantity((prev) => prev + 1);
+    if (!item.products) return;
+
+    addToCart({
+      id: item.products.id,
+      name: item.products.name,
+      image: item.products.image_url || item.thumbnail_url || fallbackImage,
+      price: discountedPrice,
+      originalPrice,
+      quantity: 1,
+      dealType: null,
+    });
   };
 
   const decrementQuantity = () => {
-    setQuantity((prev) => Math.max(0, prev - 1));
+    if (!cartItemId || quantity <= 0) return;
+    updateCartItemQuantity(cartItemId, quantity - 1);
   };
 
   const fallbackImage = 'https://images.pexels.com/photos/264905/pexels-photo-264905.jpeg?auto=compress&cs=tinysrgb&w=600';

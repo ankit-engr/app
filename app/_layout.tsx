@@ -4,6 +4,8 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
+import { AppStateProvider } from '@/contexts/AppStateContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 function StatusBarBackground() {
   const insets = useSafeAreaInsets();
@@ -15,14 +17,16 @@ export default function RootLayout() {
   useFrameworkReady();
 
   return (
-    <>
-      <StatusBarBackground />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="light" backgroundColor="#DC2626" />
-    </>
+    <AppStateProvider>
+      <ToastProvider>
+        <StatusBarBackground />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="+not-found" />
+        </Stack>
+        <StatusBar style="light" backgroundColor="#DC2626" />
+      </ToastProvider>
+    </AppStateProvider>
   );
 }
 

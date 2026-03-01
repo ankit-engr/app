@@ -1,6 +1,8 @@
 import { View, Text, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Clock, Star, TrendingUp, ArrowRight, Heart, Share2 } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
+import { useToast } from '@/contexts/ToastContext';
 
 const { width } = Dimensions.get('window');
 
@@ -37,6 +39,39 @@ const DAILY_PICKS = [
 ];
 
 export default function DailySpaceSection() {
+    const { addToCart, cartItems, updateCartItemQuantity } = useAppState();
+    const { showToast } = useToast();
+
+    const getCartId = (itemId: string) => `daily-pick-${itemId}`;
+    const getQty = (itemId: string) => cartItems.find((x) => x.id === getCartId(itemId))?.quantity ?? 0;
+
+    const handleAddToCart = (item: (typeof DAILY_PICKS)[number]) => {
+        const price = Number(item.price.replace(/[^\d]/g, '')) || 0;
+        const originalPrice = Number(item.oldPrice.replace(/[^\d]/g, '')) || price;
+
+        addToCart({
+            id: getCartId(item.id),
+            name: item.name,
+            image: item.image,
+            price,
+            originalPrice,
+            quantity: 1,
+            dealType: 'daily',
+        });
+
+        showToast({
+            title: 'Added to cart',
+            message: `${item.name} added`,
+            type: 'success',
+        });
+    };
+
+    const handleDecrement = (itemId: string) => {
+        const currentQty = getQty(itemId);
+        if (currentQty <= 0) return;
+        updateCartItemQuantity(getCartId(itemId), currentQty - 1);
+    };
+
     return (
         <View style={styles.container}>
             {/* Header Section */}
@@ -111,9 +146,21 @@ export default function DailySpaceSection() {
                                     <Text style={styles.oldPrice}>{item.oldPrice}</Text>
                                 </View>
 
-                                <TouchableOpacity style={styles.addToCartBtn}>
-                                    <Text style={styles.addToCartText}>Add to Cart</Text>
-                                </TouchableOpacity>
+                                {getQty(item.id) === 0 ? (
+                                    <TouchableOpacity style={styles.addToCartBtn} onPress={() => handleAddToCart(item)}>
+                                        <Text style={styles.addToCartText}>Add to Cart</Text>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <View style={styles.qtyWrap}>
+                                        <TouchableOpacity style={styles.qtyBtn} onPress={() => handleDecrement(item.id)}>
+                                            <Text style={styles.qtyBtnText}>−</Text>
+                                        </TouchableOpacity>
+                                        <Text style={styles.qtyText}>{getQty(item.id)}</Text>
+                                        <TouchableOpacity style={styles.qtyBtn} onPress={() => handleAddToCart(item)}>
+                                            <Text style={styles.qtyBtnText}>+</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
                             </View>
                         </View>
                     ))}
@@ -357,6 +404,34 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
         color: '#374151',
+    },
+    qtyWrap: {
+        height: 30,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        overflow: 'hidden',
+    },
+    qtyBtn: {
+        width: 30,
+        height: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    qtyBtnText: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#374151',
+        lineHeight: 20,
+    },
+    qtyText: {
+        minWidth: 22,
+        textAlign: 'center',
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#111827',
     },
     trendingContainer: {
         paddingHorizontal: 16,

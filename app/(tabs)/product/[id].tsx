@@ -14,6 +14,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Heart, Share2, ShoppingCart, Star } from 'lucide-react-native';
 import { getProductById, getProductBySlug, getImageUrl, type ProductDetailResponse } from '@/lib/api';
 import ProductImageGallery from '@/components/ProductImageGallery';
+import { useAppState } from '@/contexts/AppStateContext';
+import { useToast } from '@/contexts/ToastContext';
 
 type ProductDetailData = NonNullable<ProductDetailResponse['data']>;
 
@@ -58,11 +60,13 @@ function colorToHex(name: string): string | null {
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { addToCart, cartItems, updateCartItemQuantity } = useAppState();
+  const { showToast } = useToast();
   const [detail, setDetail] = useState<ProductDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const [quantity, setQuantity] = useState(1);
+  const [pendingQuantity, setPendingQuantity] = useState(1);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const dealEndsAtRef = useRef<Date>(new Date(Date.now() + 24 * 60 * 60 * 1000));
   const [, forceTick] = useState(0);
@@ -150,6 +154,46 @@ export default function ProductDetailScreen() {
   const subtitle = (categoryName || vendorName).toUpperCase();
   const displayRating = clamp(p.averageRating ?? 4.9, 0, 5);
   const ratingStars = Math.round(displayRating);
+  const primaryImage = images[0] ?? getImageUrl(p.product_images?.[0]?.imageUrl ?? '');
+  const cartItemId = selectedVariant ? `${p.id}:${selectedVariant.id}` : p.id;
+  const cartQuantity = cartItems.find((item) => item.id === cartItemId)?.quantity ?? 0;
+  const displayQuantity = cartQuantity > 0 ? cartQuantity : pendingQuantity;
+
+  const incrementQuantity = () => {
+    if (cartQuantity > 0) {
+      updateCartItemQuantity(cartItemId, cartQuantity + 1);
+      return;
+    }
+    setPendingQuantity((q) => Math.min(99, q + 1));
+  };
+
+  const decrementQuantity = () => {
+    if (cartQuantity > 0) {
+      updateCartItemQuantity(cartItemId, cartQuantity - 1);
+      return;
+    }
+    setPendingQuantity((q) => Math.max(1, q - 1));
+  };
+
+  const handleAddToCart = () => {
+    const variantSuffix = selectedVariant ? ` (${selectedVariant.name})` : '';
+
+    addToCart({
+      id: cartItemId,
+      name: `${p.name}${variantSuffix}`,
+      image: primaryImage || 'https://picsum.photos/300',
+      price: Math.round(effectivePrice),
+      originalPrice: Math.round(comparePrice),
+      quantity: pendingQuantity,
+      dealType: null,
+    });
+
+    showToast({
+      title: 'Added to cart',
+      message: `${pendingQuantity} item${pendingQuantity > 1 ? 's' : ''}${selectedVariant ? ` • ${selectedVariant.name}` : ''}`,
+      type: 'success',
+    });
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -168,9 +212,7 @@ export default function ProductDetailScreen() {
                 <Share2 size={20} color="#111827" />
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() =>
-                  Alert.alert('Cart', `Added to cart: ${quantity} ${selectedVariant ? `• ${selectedVariant.name}` : ''}`)
-                }
+                onPress={handleAddToCart}
                 style={styles.heroIconBtn}>
                 <ShoppingCart size={20} color="#111827" />
               </TouchableOpacity>
@@ -258,16 +300,16 @@ export default function ProductDetailScreen() {
             <View style={styles.qtyRow}>
               <TouchableOpacity
                 style={styles.qtyBtn}
-                onPress={() => setQuantity((q) => Math.max(1, q - 1))}
+                onPress={decrementQuantity}
                 activeOpacity={0.8}>
                 <Text style={styles.qtyBtnText}>–</Text>
               </TouchableOpacity>
               <View style={styles.qtyVal}>
-                <Text style={styles.qtyValText}>{quantity}</Text>
+                <Text style={styles.qtyValText}>{displayQuantity}</Text>
               </View>
               <TouchableOpacity
                 style={styles.qtyBtn}
-                onPress={() => setQuantity((q) => Math.min(99, q + 1))}
+                onPress={incrementQuantity}
                 activeOpacity={0.8}>
                 <Text style={styles.qtyBtnText}>+</Text>
               </TouchableOpacity>
@@ -359,17 +401,24 @@ export default function ProductDetailScreen() {
             fill={isFavorite ? '#DC2626' : 'transparent'}
           />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.ctaBtn}
-          activeOpacity={0.9}
-          onPress={() =>
-            Alert.alert(
-              'Cart',
-              `Added to cart: ${quantity} ${selectedVariant ? `• ${selectedVariant.name}` : ''}`
-            )
-          }>
-          <Text style={styles.ctaText}>ADD TO CART</Text>
-        </TouchableOpacity>
+        {cartQuantity > 0 ? (
+          <View style={styles.ctaQtyWrap}>
+            <TouchableOpacity style={styles.ctaQtyBtn} onPress={decrementQuantity} activeOpacity={0.85}>
+              <Text style={styles.ctaQtyBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.ctaQtyText}>{cartQuantity}</Text>
+            <TouchableOpacity style={styles.ctaQtyBtn} onPress={incrementQuantity} activeOpacity={0.85}>
+              <Text style={styles.ctaQtyBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.ctaBtn}
+            activeOpacity={0.9}
+            onPress={handleAddToCart}>
+            <Text style={styles.ctaText}>ADD TO CART</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -736,6 +785,35 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 1.0,
     fontSize: 14,
+  },
+  ctaQtyWrap: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#DC2626',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+  },
+  ctaQtyBtn: {
+    width: 54,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaQtyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '800',
+    lineHeight: 28,
+  },
+  ctaQtyText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    minWidth: 32,
+    textAlign: 'center',
   },
   bottomPadding: {
     height: 26,

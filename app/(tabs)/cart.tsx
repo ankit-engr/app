@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   View,
   Text,
@@ -10,66 +9,19 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, ClipboardList, Zap, CalendarDays, X } from 'lucide-react-native';
-
-type DealType = 'hourly' | 'daily' | null;
-
-interface CartItem {
-  id: string;
-  name: string;
-  image: string;
-  price: number;
-  originalPrice: number;
-  quantity: number;
-  dealType: DealType;
-}
-
-const INITIAL_CART: CartItem[] = [
-  {
-    id: '1',
-    name: 'Wireless Pro Headphones',
-    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300',
-    price: 4999,
-    originalPrice: 12999,
-    quantity: 1,
-    dealType: 'hourly',
-  },
-  {
-    id: '2',
-    name: 'Smart Watch Series X',
-    image: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?w=300',
-    price: 15999,
-    originalPrice: 24999,
-    quantity: 1,
-    dealType: 'daily',
-  },
-  {
-    id: '3',
-    name: 'Speed Runner Neo',
-    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=300',
-    price: 6999,
-    originalPrice: 6999,
-    quantity: 1,
-    dealType: null,
-  },
-];
+import { useAppState } from '@/contexts/AppStateContext';
 
 export default function CartScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [cartItems, setCartItems] = useState<CartItem[]>(INITIAL_CART);
+  const { cartItems, updateCartItemQuantity, removeCartItem } = useAppState();
 
-  const updateQty = (id: string, delta: number) => {
-    setCartItems((prev) =>
-      prev
-        .map((item) =>
-          item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item
-        )
-        .filter((item) => item.quantity > 0)
-    );
+  const updateQty = (id: string, currentQty: number, delta: number) => {
+    updateCartItemQuantity(id, currentQty + delta);
   };
 
   const removeItem = (id: string) => {
-    setCartItems((prev) => prev.filter((item) => item.id !== id));
+    removeCartItem(id);
   };
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -161,14 +113,14 @@ export default function CartScreen() {
                   <View style={styles.qtyRow}>
                     <TouchableOpacity
                       style={styles.qtyBtn}
-                      onPress={() => updateQty(item.id, -1)}
+                      onPress={() => updateQty(item.id, item.quantity, -1)}
                       activeOpacity={0.8}>
                       <Text style={styles.qtyBtnText}>−</Text>
                     </TouchableOpacity>
                     <Text style={styles.qtyValue}>{item.quantity}</Text>
                     <TouchableOpacity
                       style={styles.qtyBtn}
-                      onPress={() => updateQty(item.id, 1)}
+                      onPress={() => updateQty(item.id, item.quantity, 1)}
                       activeOpacity={0.8}>
                       <Text style={styles.qtyBtnText}>+</Text>
                     </TouchableOpacity>

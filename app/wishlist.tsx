@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, Search, Heart, Bell } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
 
 type FilterTab = 'All Items' | 'Active' | 'Brands' | 'Expired';
 type DealBadge = 'ENDS IN 2H' | 'HOURLY DEAL' | 'FLASH SALE' | 'DEAL EXPIRED' | null;
@@ -78,6 +79,7 @@ const fmt = (n: number) =>
 export default function WishlistScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { addToCart } = useAppState();
   const [activeTab, setActiveTab] = useState<FilterTab>('All Items');
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set(ITEMS.map((i) => i.id)));
 
@@ -96,6 +98,18 @@ export default function WishlistScreen() {
     if (activeTab === 'Brands') return false;
     return true;
   });
+
+  const moveToCart = (item: WishlistItem) => {
+    addToCart({
+      id: `wishlist-${item.id}`,
+      name: item.name,
+      image: item.image,
+      price: item.price,
+      originalPrice: item.originalPrice,
+      quantity: 1,
+      dealType: item.badge === 'HOURLY DEAL' ? 'hourly' : 'daily',
+    });
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -183,7 +197,7 @@ export default function WishlistScreen() {
                     <Text style={styles.expiredBtnText}>EXPIRED</Text>
                   </View>
                 ) : (
-                  <TouchableOpacity style={styles.cartBtn} activeOpacity={0.9}>
+                  <TouchableOpacity style={styles.cartBtn} activeOpacity={0.9} onPress={() => moveToCart(item)}>
                     <Text style={styles.cartBtnText}>MOVE TO CART</Text>
                   </TouchableOpacity>
                 )}
