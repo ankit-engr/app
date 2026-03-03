@@ -26,6 +26,41 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface GoogleLoginRequest {
+  credential: string;
+}
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  profilePictureUrl?: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface GoogleLoginResponse {
+  user: AuthUser;
+  token: string;
+  isNewUser: boolean;
+}
+
+export async function googleLogin(payload: GoogleLoginRequest): Promise<GoogleLoginResponse> {
+  const res = await fetchApi<{ success: boolean; data: GoogleLoginResponse; message?: string }>('/api/auth/google-login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  if (!res?.data?.token || !res?.data?.user?.email) {
+    throw new Error(res?.message || 'Google login failed');
+  }
+
+  return res.data;
+}
+
 // --- Home (matches actual API response) ---
 export interface HomePageBanner {
   image: string;

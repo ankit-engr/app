@@ -6262,10 +6262,10 @@
           ]
         },
         {
-          "name": "Cashfree Payments",
+          "name": "PayU Payments",
           "item": [
             {
-              "name": "Create Cashfree Order",
+              "name": "Create PayU Order",
               "request": {
                 "method": "POST",
                 "header": [
@@ -6281,14 +6281,14 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/api/users/cashfree/create-order",
+                  "raw": "{{base_url}}/api/users/payu/create-order",
                   "host": [
                     "{{base_url}}"
                   ],
                   "path": [
                     "api",
                     "users",
-                    "cashfree",
+                    "payu",
                     "create-order"
                   ]
                 },
@@ -6304,7 +6304,7 @@
               }
             },
             {
-              "name": "Verify Cashfree Payment",
+              "name": "Verify PayU Payment",
               "request": {
                 "method": "POST",
                 "header": [
@@ -6320,20 +6320,20 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{base_url}}/api/users/cashfree/verify-payment",
+                  "raw": "{{base_url}}/api/users/payu/verify-payment",
                   "host": [
                     "{{base_url}}"
                   ],
                   "path": [
                     "api",
                     "users",
-                    "cashfree",
+                    "payu",
                     "verify-payment"
                   ]
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"order_id\": \"cashfree_order_id\",\n  \"payment_session_id\": \"payment_session_id\",\n  \"orderId\": \"order_id\"\n}",
+                  "raw": "{\n  \"txnid\": \"payu_txnid\",\n  \"status\": \"success\",\n  \"mihpayid\": \"payu_payment_id\",\n  \"orderId\": \"order_id\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"

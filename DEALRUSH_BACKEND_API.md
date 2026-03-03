@@ -756,9 +756,7 @@ These require authentication (e.g. session cookie or Bearer token). Use the same
 | Order by ID | GET | `/api/users/orders/{id}` |
 | Order cancel | POST | `/api/users/orders/{id}/cancel` |
 | Order status history | GET | `/api/users/orders/{id}/status-history` |
-| Create order (Cashfree) | POST | `/api/users/cashfree/create-order` |
-| Verify payment (Cashfree) | POST | `/api/users/cashfree/verify-payment` |
-| Razorpay create order | POST | `/api/users/razorpay/create-order` |
-| Razorpay verify payment | POST | `/api/users/razorpay/verify-payment` |
+| Create order (PayU) | POST | `/api/users/payu/create-order` |
+| Verify payment (PayU) | POST | `/api/users/payu/verify-payment` |
 
 Vendor/partner flows use `/api/auth/vendor-login`, `/api/auth/vendor-quick-register`, `/api/auth/vendor-complete-register`, `/api/auth/vendor-verify-token`, etc. All of these proxy to the same backend base URL.

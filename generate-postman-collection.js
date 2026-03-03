@@ -734,18 +734,19 @@ const customerFolder = {
         createRequest("Delete Payment Method", "DELETE", "/api/users/payment-methods/:id", "customer", "customer")
       ]
     },
-    // Cashfree Payments
+    // PayU Payments
     {
-      name: "Cashfree Payments",
+      name: "PayU Payments",
       item: [
-        createRequest("Create Cashfree Order", "POST", "/api/users/cashfree/create-order", "customer", "customer", {
+        createRequest("Create PayU Order", "POST", "/api/users/payu/create-order", "customer", "customer", {
           amount: 1000.00,
           currency: "INR",
           orderId: "order_id"
         }),
-        createRequest("Verify Cashfree Payment", "POST", "/api/users/cashfree/verify-payment", "customer", "customer", {
-          order_id: "cashfree_order_id",
-          payment_session_id: "payment_session_id",
+        createRequest("Verify PayU Payment", "POST", "/api/users/payu/verify-payment", "customer", "customer", {
+          txnid: "payu_txnid",
+          status: "success",
+          mihpayid: "payu_payment_id",
           orderId: "order_id"
         })
       ]

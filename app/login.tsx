@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,22 +8,147 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, ArrowRight, Zap, Mail } from 'lucide-react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import Constants from 'expo-constants';
+import { useAppState } from '@/contexts/AppStateContext';
+import { useToast } from '@/contexts/ToastContext';
+import { googleLogin } from '@/lib/api';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { login } = useAppState();
+  const { showToast } = useToast();
   const [showEmailInput, setShowEmailInput] = useState(false);
   const [email, setEmail] = useState('');
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  const googleWebClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
+  const googleAndroidClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleWebClientId;
+  const googleIosClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || googleWebClientId;
+  const isExpoGo = Constants.executionEnvironment === 'storeClient';
+  const toGoogleNativeScheme = (clientId?: string) => {
+    if (!clientId) return null;
+    return clientId.endsWith('.apps.googleusercontent.com')
+      ? `com.googleusercontent.apps.${clientId.replace('.apps.googleusercontent.com', '')}`
+      : null;
+  };
+  const iosGoogleScheme = toGoogleNativeScheme(googleIosClientId);
+  const androidGoogleScheme = toGoogleNativeScheme(googleAndroidClientId);
+  const nativeRedirect =
+    Platform.OS === 'ios'
+      ? `${iosGoogleScheme ?? 'myapp'}:/oauthredirect`
+      : `${androidGoogleScheme ?? 'myapp'}:/oauthredirect`;
+
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest(
+    {
+      webClientId: googleWebClientId,
+      androidClientId: googleAndroidClientId,
+      iosClientId: googleIosClientId,
+    },
+    {
+      native: nativeRedirect,
+    }
+  );
 
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const handleSendOtp = () => {
     if (!isValidEmail) return;
     router.push({ pathname: '/verify-email', params: { email: email.trim() } });
+  };
+
+  useEffect(() => {
+    const loginWithGoogleToken = async () => {
+      if (!response) return;
+
+      if (response.type !== 'success') {
+        if (response.type !== 'dismiss' && response.type !== 'cancel') {
+          showToast({
+            title: 'Google login failed',
+            message: 'Please try again.',
+            type: 'error',
+          });
+        }
+        return;
+      }
+
+      const idToken = response.params?.id_token;
+      if (!idToken) {
+        showToast({
+          title: 'Google login failed',
+          message: 'No token received from Google.',
+          type: 'error',
+        });
+        return;
+      }
+
+      setIsGoogleLoading(true);
+      try {
+        const auth = await googleLogin({ credential: idToken });
+        await login(auth.user.email);
+        showToast({
+          title: 'Logged in',
+          message: 'Welcome back to DealRush.',
+          type: 'success',
+        });
+        router.replace('/(tabs)');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Please try again.';
+        showToast({
+          title: 'Google login failed',
+          message,
+          type: 'error',
+        });
+      } finally {
+        setIsGoogleLoading(false);
+      }
+    };
+
+    void loginWithGoogleToken();
+  }, [login, response, router, showToast]);
+
+  const handleGoogleLogin = async () => {
+    if (!googleWebClientId) {
+      showToast({
+        title: 'Google config missing',
+        message: 'Set EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in app environment.',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (isExpoGo) {
+      showToast({
+        title: 'Use dev build for Google login',
+        message: 'Google blocks Expo Go redirect URI. Run npm run android or npm run ios.',
+        type: 'info',
+      });
+      return;
+    }
+
+    if (Platform.OS === 'ios' && !iosGoogleScheme) {
+      showToast({
+        title: 'iOS client ID invalid',
+        message: 'EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID is missing or malformed.',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (!request) return;
+    await promptAsync();
   };
 
   return (
@@ -65,9 +190,19 @@ export default function LoginScreen() {
         <Text style={styles.heading}>Log in to catch the next rush</Text>
 
         {/* Google button */}
-        <TouchableOpacity style={styles.googleBtn} activeOpacity={0.85}>
-          <Text style={styles.googleG}>G</Text>
-          <Text style={styles.googleText}>Continue with Google</Text>
+        <TouchableOpacity
+          style={[styles.googleBtn, (isGoogleLoading || !request) && styles.googleBtnDisabled]}
+          activeOpacity={0.85}
+          onPress={handleGoogleLogin}
+          disabled={isGoogleLoading || !request}>
+          {isGoogleLoading ? (
+            <ActivityIndicator size="small" color="#DC2626" />
+          ) : (
+            <Text style={styles.googleG}>G</Text>
+          )}
+          <Text style={styles.googleText}>
+            {isGoogleLoading ? 'Signing in...' : 'Continue with Google'}
+          </Text>
         </TouchableOpacity>
 
         {/* Email section */}
@@ -204,6 +339,7 @@ const styles = StyleSheet.create({
   },
   googleG: { fontSize: 18, fontWeight: '900', color: '#4285F4', fontStyle: 'italic' },
   googleText: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  googleBtnDisabled: { opacity: 0.6 },
 
   /* Email toggle button */
   emailBtn: {

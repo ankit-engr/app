@@ -220,9 +220,9 @@ Contains all customer/user endpoints organized by modules:
 - Create Payment Method
 - Delete Payment Method
 
-#### Cashfree Payments
-- Create Cashfree Order
-- Verify Cashfree Payment
+#### PayU Payments
+- Create PayU Order
+- Verify PayU Payment
 
 ### 5. **Public** Folder
 Contains all public/shared endpoints:
