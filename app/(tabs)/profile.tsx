@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
@@ -14,13 +14,16 @@ import {
   LogOut,
   ChevronRight,
 } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
+import { getProfile, CompleteProfileResponse, getAddresses, ApiAddress, getImageUrl } from '@/lib/api';
+import { useState, useEffect } from 'react';
 
 const MENU_TOP = [
-  { Icon: ShoppingBag,  label: 'My Orders',         route: '/order-history' },
-  { Icon: Heart,        label: 'Wishlist',           route: '/wishlist' },
-  { Icon: RefreshCcw,   label: 'Refunds & Returns',  route: null },
-  { Icon: MapPin,       label: 'Saved Addresses',    route: null },
-  { Icon: CreditCard,   label: 'Payment Methods',    route: null },
+  { Icon: ShoppingBag, label: 'My Orders', route: '/order-history' },
+  { Icon: Heart, label: 'Wishlist', route: '/wishlist' },
+  { Icon: RefreshCcw, label: 'Refunds & Returns', route: null },
+  { Icon: MapPin, label: 'Saved Addresses', route: '/address-management' },
+  { Icon: CreditCard, label: 'Payment Methods', route: null },
 ];
 
 const MENU_BOTTOM = [
@@ -30,6 +33,53 @@ const MENU_BOTTOM = [
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { session, logout, isLoggedIn } = useAppState();
+  const [profileData, setProfileData] = useState<CompleteProfileResponse | null>(null);
+  const [addresses, setAddresses] = useState<ApiAddress[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isLoggedIn && session?.token) {
+      fetchProfile();
+    } else {
+      setLoading(false);
+    }
+  }, [isLoggedIn, session?.token]);
+
+  const fetchProfile = async () => {
+    try {
+      if (!session?.token) return;
+      const [pData, addrData] = await Promise.all([
+        getProfile(session.token),
+        getAddresses(session.token)
+      ]);
+      setProfileData(pData);
+      setAddresses(addrData);
+    } catch (error) {
+      console.error('Failed to fetch profile/addresses:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
+  if (!isLoggedIn) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Text style={{ fontSize: 18, color: '#111827', fontWeight: '800', marginBottom: 10 }}>Not logged in</Text>
+        <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24 }}>Log in to view your profile and manage orders.</Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#DC2626', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12 }}
+          onPress={() => router.push('/login')}>
+          <Text style={{ color: '#FFFFFF', fontWeight: '800' }}>Log In</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -50,13 +100,22 @@ export default function ProfileScreen() {
         <View style={styles.avatarSection}>
           <View style={styles.avatarWrap}>
             <Image
-              source={{ uri: 'https://i.pravatar.cc/150?img=11' }}
+              source={{ uri: profileData?.user?.profilePictureUrl ? getImageUrl(profileData.user.profilePictureUrl) : 'https://i.pravatar.cc/150?img=11' }}
               style={styles.avatar}
             />
           </View>
 
-          <Text style={styles.userName}>Alex Johnson</Text>
-          <Text style={styles.memberSince}>Member since July 2023</Text>
+          <Text style={styles.userName}>{(profileData?.user?.firstName ? `${profileData.user.firstName} ${profileData.user.lastName}` : session?.email.split('@')[0]) || 'User'}</Text>
+          <Text style={styles.memberSince}>{session?.email || 'user@dealrush.com'}</Text>
+
+          {addresses.length > 0 && (
+            <View style={styles.addressMini}>
+              <MapPin size={12} color="#9CA3AF" />
+              <Text style={styles.addressMiniText} numberOfLines={1}>
+                {addresses.find(a => a.isDefault)?.addressLine1 || addresses[0].addressLine1}, {addresses.find(a => a.isDefault)?.city || addresses[0].city}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* ── Divider ── */}
@@ -64,16 +123,22 @@ export default function ProfileScreen() {
 
         {/* ── Stats ── */}
         <View style={styles.statsRow}>
-          {[
-            { value: '124', label: 'ORDERS' },
-            { value: '12',  label: 'WISHLIST' },
-            { value: '3',   label: 'IN CART' },
-          ].map((stat, idx, arr) => (
-            <View key={stat.label} style={[styles.statItem, idx < arr.length - 1 && styles.statBorder]}>
-              <Text style={styles.statValue}>{stat.value}</Text>
-              <Text style={styles.statLabel}>{stat.label}</Text>
-            </View>
-          ))}
+          {loading ? (
+            <ActivityIndicator size="small" color="#DC2626" style={{ flex: 1 }} />
+          ) : (
+            <>
+              {[
+                { value: String(profileData?.totalOrders ?? '0'), label: 'ORDERS' },
+                { value: String(profileData?.wishlistCount ?? '0'), label: 'WISHLIST' },
+                { value: String(profileData?.cartCount ?? '0'), label: 'IN CART' },
+              ].map((stat, idx, arr) => (
+                <View key={stat.label} style={[styles.statItem, idx < arr.length - 1 && styles.statBorder]}>
+                  <Text style={styles.statValue}>{stat.value}</Text>
+                  <Text style={styles.statLabel}>{stat.label}</Text>
+                </View>
+              ))}
+            </>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -124,7 +189,10 @@ export default function ProfileScreen() {
           ))}
 
           {/* Logout */}
-          <TouchableOpacity style={[styles.menuRow, styles.menuRowBorderTop]} activeOpacity={0.75}>
+          <TouchableOpacity
+            style={[styles.menuRow, styles.menuRowBorderTop]}
+            activeOpacity={0.75}
+            onPress={handleLogout}>
             <View style={[styles.menuIconWrap, { backgroundColor: '#FEE2E2' }]}>
               <LogOut size={18} color="#DC2626" strokeWidth={2} />
             </View>
@@ -174,6 +242,8 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     paddingVertical: 20,
+    minHeight: 60,
+    alignItems: 'center',
   },
   statItem: { flex: 1, alignItems: 'center' },
   statBorder: { borderRightWidth: 1, borderRightColor: '#F3F4F6' },
@@ -230,4 +300,20 @@ const styles = StyleSheet.create({
   brandBannerText: { flex: 1 },
   brandBannerTitle: { color: '#FFFFFF', fontWeight: '900', fontSize: 15, marginBottom: 3 },
   brandBannerSub: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '500' },
+  addressMini: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  addressMiniText: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
+    maxWidth: 200,
+  },
 });

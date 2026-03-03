@@ -5,23 +5,81 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, ClipboardList, Zap, CalendarDays, X } from 'lucide-react-native';
 import { useAppState } from '@/contexts/AppStateContext';
+import { getCart, updateCartItemQuantityApi, removeCartItemApi, getImageUrl, toNum } from '@/lib/api';
+import { useEffect, useState } from 'react';
 
 export default function CartScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { cartItems, updateCartItemQuantity, removeCartItem } = useAppState();
+  const { cartItems, updateCartItemQuantity, removeCartItem, session, isLoggedIn, addToCart, setCartItems } = useAppState();
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const updateQty = (id: string, currentQty: number, delta: number) => {
-    updateCartItemQuantity(id, currentQty + delta);
+  useEffect(() => {
+    if (isLoggedIn && session?.token) {
+      fetchBackendCart();
+    }
+  }, [isLoggedIn, session?.token]);
+
+  const fetchBackendCart = async () => {
+    if (!session?.token) return;
+    try {
+      const data = await getCart(session.token);
+      // Replace entire cart with cloud data to ensure sync
+      const cloudItems = data.cartItems.map(item => ({
+        id: item.productId,
+        cloudId: item.id,
+        name: item.products.name,
+        image: getImageUrl(item.products.product_images?.[0]?.imageUrl),
+        price: toNum(item.unitPrice),
+        originalPrice: toNum(item.products.basePrice || item.products.price),
+        quantity: item.quantity,
+        dealType: (item.products.activeDealType || null) as any
+      }));
+      setCartItems(cloudItems);
+    } catch (error) {
+      console.error('Failed to fetch backend cart:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  const removeItem = (id: string) => {
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchBackendCart();
+  };
+
+  const updateQty = async (id: string, currentQty: number, delta: number) => {
+    const item = cartItems.find(i => i.id === id);
+    const newQty = currentQty + delta;
+    updateCartItemQuantity(id, newQty);
+
+    if (isLoggedIn && session?.token && item?.cloudId) {
+      try {
+        await updateCartItemQuantityApi(session.token, item.cloudId, newQty);
+      } catch (error) {
+        console.error('Failed to update qty on backend:', error);
+      }
+    }
+  };
+
+  const removeItem = async (id: string) => {
+    const item = cartItems.find(i => i.id === id);
     removeCartItem(id);
+    if (isLoggedIn && session?.token && item?.cloudId) {
+      try {
+        await removeCartItemApi(session.token, item.cloudId);
+      } catch (error) {
+        console.error('Failed to remove item from backend:', error);
+      }
+    }
   };
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -50,7 +108,8 @@ export default function CartScreen() {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#DC2626" />}>
 
         {/* ── Items header ── */}
         <View style={styles.itemsHeaderRow}>

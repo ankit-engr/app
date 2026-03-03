@@ -18,11 +18,22 @@ export interface GuestCartSyncItem {
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+
+  // Headers with Auth if available
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  };
+
   const res = await fetch(url, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers,
   });
-  if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.message || `API error: ${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
@@ -56,6 +67,54 @@ export async function googleLogin(payload: GoogleLoginRequest): Promise<GoogleLo
 
   if (!res?.data?.token || !res?.data?.user?.email) {
     throw new Error(res?.message || 'Google login failed');
+  }
+
+  return res.data;
+}
+
+export interface SendEmailOTPResponse {
+  email: string;
+  isNewUser: boolean;
+  tempToken: string;
+}
+
+export async function sendEmailOTP(email: string): Promise<SendEmailOTPResponse> {
+  const res = await fetchApi<{ success: boolean; data: SendEmailOTPResponse; message?: string }>(
+    '/api/auth/send-email-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }
+  );
+
+  if (!res.success || !res.data) {
+    throw new Error(res.message || 'Failed to send OTP');
+  }
+
+  return res.data;
+}
+
+export interface VerifyEmailOTPRequest {
+  tempToken: string;
+  otp: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+}
+
+export async function verifyEmailOTP(
+  payload: VerifyEmailOTPRequest
+): Promise<GoogleLoginResponse> {
+  const res = await fetchApi<{ success: boolean; data: GoogleLoginResponse; message?: string }>(
+    '/api/auth/verify-email-otp',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!res.success || !res.data) {
+    throw new Error(res.message || 'OTP verification failed');
   }
 
   return res.data;
@@ -335,7 +394,7 @@ export async function getShopItems(body: {
   };
 }
 
-function toNum(v: number | string | undefined): number {
+export function toNum(v: number | string | undefined): number {
   if (v === undefined || v === null) return 0;
   return typeof v === 'string' ? parseFloat(v) || 0 : v;
 }
@@ -487,4 +546,265 @@ export function shopPageProductToProductWithDeal(p: ShopPageProduct): import('@/
       created_at: '',
     },
   };
+}
+
+// --- Protected API Utilities ---
+function getAuthHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+// --- Profile API ---
+export interface CompleteProfileResponse {
+  user: AuthUser;
+  totalOrders: number;
+  wishlistCount: number;
+  cartCount: number;
+}
+
+export async function getProfile(token: string): Promise<CompleteProfileResponse> {
+  const res = await fetchApi<{ success: boolean; data: any }>('/api/users/profile/complete', {
+    headers: getAuthHeaders(token),
+  });
+
+  // Mapping backend structure to match ProfileScreen needs
+  const d = res.data;
+  return {
+    user: d.user,
+    totalOrders: d.orders?.total || 0,
+    wishlistCount: d.wishlist?.count || 0,
+    cartCount: d.cart?.itemCount || 0,
+  };
+}
+
+export async function updateProfile(token: string, payload: Partial<AuthUser>): Promise<AuthUser> {
+  const res = await fetchApi<{ success: boolean; data: { user: AuthUser } }>('/api/users/profile', {
+    method: 'PUT',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  return res.data.user;
+}
+
+// --- Address API ---
+export interface ApiAddress {
+  id: string;
+  userId: string;
+  name?: string;
+  phone?: string;
+  addressLine1: string;
+  addressLine2?: string | null;
+  city: string;
+  state: string;
+  zipCode: string;
+  country: string;
+  isDefault: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+export async function getAddresses(token: string): Promise<ApiAddress[]> {
+  const res = await fetchApi<{ success: boolean; data: { addresses: ApiAddress[] } }>('/api/users/addresses', {
+    headers: getAuthHeaders(token),
+  });
+  return res.data.addresses;
+}
+
+export async function createAddress(token: string, address: Omit<ApiAddress, 'id' | 'userId'>): Promise<ApiAddress> {
+  const res = await fetchApi<{ success: boolean; data: { address: ApiAddress } }>('/api/users/addresses', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(address),
+  });
+  return res.data.address;
+}
+
+export async function updateAddress(token: string, id: string, address: Partial<ApiAddress>): Promise<ApiAddress> {
+  const res = await fetchApi<{ success: boolean; data: { address: ApiAddress } }>(`/api/users/addresses/${id}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(address),
+  });
+  return res.data.address;
+}
+
+export async function deleteAddress(token: string, id: string): Promise<void> {
+  await fetchApi(`/api/users/addresses/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(token),
+  });
+}
+
+// --- Cart API ---
+export interface BackendCartItem {
+  id: string;
+  productId: string;
+  variantId?: string | null;
+  quantity: number;
+  products: {
+    id: string;
+    name: string;
+    price: number;
+    effectivePrice?: number;
+    basePrice?: number;
+    originalPrice?: number;
+    activeDealType?: string | null;
+    product_images?: { imageUrl: string }[];
+    vendors?: { name: string };
+  };
+  product_variants?: {
+    id: string;
+    name: string;
+    additionalPrice: number;
+  };
+  unitPrice: number;
+  itemTotal: number;
+}
+
+export async function getCart(token: string): Promise<{ cartItems: BackendCartItem[]; total: number }> {
+  const res = await fetchApi<{ success: boolean; data: { cartItems: BackendCartItem[]; total: number } }>(
+    '/api/users/cart',
+    {
+      headers: getAuthHeaders(token),
+    }
+  );
+  return res.data;
+}
+
+export async function addToCartApi(
+  token: string,
+  payload: { productId: string; variantId?: string | null; quantity: number }
+): Promise<BackendCartItem> {
+  const res = await fetchApi<{ success: boolean; data: { cartItem: BackendCartItem } }>('/api/users/cart', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  return res.data.cartItem;
+}
+
+export async function updateCartItemQuantityApi(token: string, id: string, quantity: number): Promise<void> {
+  await fetchApi(`/api/users/cart/${id}`, {
+    method: 'PUT',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ quantity }),
+  });
+}
+
+export async function removeCartItemApi(token: string, id: string): Promise<void> {
+  await fetchApi(`/api/users/cart/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(token),
+  });
+}
+
+// --- Orders API ---
+export interface ApiOrder {
+  id: string;
+  orderNumber: string;
+  totalAmount: number;
+  orderStatus: string;
+  createdAt: string;
+  order_items: Array<{
+    id: string;
+    productId: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    products: {
+      name: string;
+      product_images?: { imageUrl: string }[];
+    };
+  }>;
+  order_addresses?: ApiAddress;
+}
+
+export async function getOrders(token: string): Promise<ApiOrder[]> {
+  const res = await fetchApi<{ success: boolean; data: { orders: ApiOrder[] } }>('/api/users/orders', {
+    headers: getAuthHeaders(token),
+  });
+  return res.data.orders;
+}
+
+export async function getOrderByIdApi(token: string, id: string): Promise<ApiOrder> {
+  const res = await fetchApi<{ success: boolean; data: { order: ApiOrder } }>(`/api/users/orders/${id}`, {
+    headers: getAuthHeaders(token),
+  });
+  return res.data.order;
+}
+
+export async function createOrder(
+  token: string,
+  payload: any
+): Promise<ApiOrder> {
+  const res = await fetchApi<{ success: boolean; data: { order: ApiOrder } }>('/api/users/orders', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  return res.data.order;
+}
+
+// --- Wishlist API ---
+export async function getWishlist(token: string): Promise<any[]> {
+  const res = await fetchApi<{ success: boolean; data: { wishlistItems: any[] } }>('/api/users/wishlist', {
+    headers: getAuthHeaders(token),
+  });
+  return res.data.wishlistItems;
+}
+
+export async function toggleWishlist(token: string, productId: string): Promise<void> {
+  // Logic usually involves checking if in wishlist, but the backend uses upsert/delete
+  // For simplicity, we just provide the add call here.
+  await fetchApi('/api/users/wishlist', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ productId }),
+  });
+}
+
+// --- PayU Payment API ---
+export interface PayUOrderResponse {
+  payuPaymentUrl: string;
+  formData: {
+    key: string;
+    txnid: string;
+    amount: string;
+    productinfo: string;
+    firstname: string;
+    email: string;
+    phone: string;
+    surl: string;
+    furl: string;
+    hash: string;
+    udf1: string;
+    service_provider: string;
+  };
+  txnid: string;
+  amount: number;
+  currency: string;
+  orderId: string;
+}
+
+export async function createPayUOrder(
+  token: string,
+  payload: { orderId: string, amount: number, currency?: string }
+): Promise<PayUOrderResponse> {
+  const res = await fetchApi<{ success: boolean; data: PayUOrderResponse }>('/api/users/payu/create-order', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  return res.data;
+}
+
+export async function verifyPayUPayment(
+  token: string,
+  payload: any
+): Promise<any> {
+  const res = await fetchApi<{ success: boolean; data: any }>('/api/users/payu/verify-payment', {
+    method: 'POST',
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  return res.data;
 }

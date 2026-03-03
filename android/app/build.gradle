@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.dealrush.app'
+    namespace 'com.dealrush.shopping.app'
     defaultConfig {
-        applicationId 'com.dealrush.app'
+        applicationId 'com.dealrush.shopping.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

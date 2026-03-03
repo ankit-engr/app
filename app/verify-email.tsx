@@ -1,14 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Delete, Zap } from 'lucide-react-native';
 import { useAppState } from '@/contexts/AppStateContext';
+import { verifyEmailOTP, sendEmailOTP } from '@/lib/api';
+import { useToast } from '@/contexts/ToastContext';
 
 const CODE_LENGTH = 6;
 const RESEND_SECONDS = 45;
@@ -24,10 +27,15 @@ export default function VerifyEmailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { login } = useAppState();
-  const { email } = useLocalSearchParams<{ email: string }>();
+  const { showToast } = useToast();
+  const { email, tempToken: initialTempToken } = useLocalSearchParams<{ email: string; tempToken: string }>();
   const displayEmail = email || 'user@example.com';
+
   const [code, setCode] = useState<string[]>([]);
   const [countdown, setCountdown] = useState(RESEND_SECONDS);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [tempToken, setTempToken] = useState(initialTempToken || '');
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -43,16 +51,68 @@ export default function VerifyEmailScreen() {
     }
   };
 
-  const handleResend = () => {
-    if (countdown > 0) return;
-    setCode([]);
-    setCountdown(RESEND_SECONDS);
-  };
+  const handleVerify = useCallback(async () => {
+    if (code.length < CODE_LENGTH || isVerifying) return;
 
-  const handleVerify = async () => {
-    if (code.length < CODE_LENGTH) return;
-    await login(displayEmail);
-    router.replace('/(tabs)');
+    setIsVerifying(true);
+    try {
+      const otp = code.join('');
+      const response = await verifyEmailOTP({
+        tempToken,
+        otp,
+      });
+
+      await login(response.user.email, response.token);
+      showToast({
+        title: 'Success',
+        message: 'Email verified successfully!',
+        type: 'success',
+      });
+
+      router.replace('/(tabs)');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Verification failed.';
+      showToast({
+        title: 'Error',
+        message,
+        type: 'error',
+      });
+      setCode([]); // Clear code on failure
+    } finally {
+      setIsVerifying(false);
+    }
+  }, [code, tempToken, isVerifying, login, router, showToast]);
+
+  useEffect(() => {
+    if (code.length === CODE_LENGTH) {
+      handleVerify();
+    }
+  }, [code, handleVerify]);
+
+  const handleResend = async () => {
+    if (countdown > 0 || isResending) return;
+
+    setIsResending(true);
+    try {
+      const data = await sendEmailOTP(displayEmail);
+      setTempToken(data.tempToken);
+      setCode([]);
+      setCountdown(RESEND_SECONDS);
+      showToast({
+        title: 'Success',
+        message: 'OTP resent successfully.',
+        type: 'success',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resend OTP.';
+      showToast({
+        title: 'Error',
+        message,
+        type: 'error',
+      });
+    } finally {
+      setIsResending(false);
+    }
   };
 
   const timerLabel = `${String(Math.floor(countdown / 60)).padStart(2, '0')}:${String(countdown % 60).padStart(2, '0')}`;
@@ -65,7 +125,7 @@ export default function VerifyEmailScreen() {
           <ArrowLeft size={22} color="#111827" strokeWidth={2.2} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Verify Email</Text>
-        <View style={styles.backBtn} />
+        <BoxPlaceholder width={36} />
       </View>
 
       {/* Body */}
@@ -99,10 +159,15 @@ export default function VerifyEmailScreen() {
 
         {/* Verify button */}
         <TouchableOpacity
-          style={[styles.verifyBtn, code.length < CODE_LENGTH && styles.verifyBtnDisabled]}
+          style={[styles.verifyBtn, (code.length < CODE_LENGTH || isVerifying) && styles.verifyBtnDisabled]}
           onPress={handleVerify}
+          disabled={code.length < CODE_LENGTH || isVerifying}
           activeOpacity={0.9}>
-          <Text style={styles.verifyText}>Verify & Login</Text>
+          {isVerifying ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.verifyText}>Verify & Login</Text>
+          )}
         </TouchableOpacity>
 
         {/* Resend */}
@@ -112,10 +177,14 @@ export default function VerifyEmailScreen() {
             Resend in <Text style={styles.timerRed}>{timerLabel}</Text>
           </Text>
         ) : null}
-        <TouchableOpacity onPress={handleResend} disabled={countdown > 0} activeOpacity={0.8}>
-          <Text style={[styles.resendBtn, countdown > 0 && styles.resendBtnDisabled]}>
-            Resend Code
-          </Text>
+        <TouchableOpacity onPress={handleResend} disabled={countdown > 0 || isResending} activeOpacity={0.8}>
+          {isResending ? (
+            <ActivityIndicator size="small" color="#DC2626" style={{ marginTop: 5 }} />
+          ) : (
+            <Text style={[styles.resendBtn, (countdown > 0 || isResending) && styles.resendBtnDisabled]}>
+              Resend Code
+            </Text>
+          )}
         </TouchableOpacity>
 
         {/* Watermark */}
@@ -149,6 +218,10 @@ export default function VerifyEmailScreen() {
       </View>
     </View>
   );
+}
+
+function BoxPlaceholder({ width }: { width: number }) {
+  return <View style={{ width }} />;
 }
 
 const styles = StyleSheet.create({

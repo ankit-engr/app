@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,57 +6,83 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Search, Star, RefreshCcw, Headphones, HelpCircle, MapPin } from 'lucide-react-native';
+import { ArrowLeft, Search, Star, RefreshCcw, HelpCircle, MapPin } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
+import { getOrders, ApiOrder, getImageUrl, toNum } from '@/lib/api';
 
 type Tab = 'All' | 'Ongoing' | 'Completed';
-
-const ORDERS = [
-  {
-    id: 'DR-9942',
-    status: 'ongoing',
-    deliveryLabel: 'ESTIMATED DELIVERY: TOMORROW',
-    transitLabel: 'IN TRANSIT',
-    step: 1, // 0=placed, 1=shipped, 2=out for delivery
-    items: [
-      { id: '1', image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200' },
-      { id: '2', image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200' },
-      { id: '3', image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=200' },
-    ],
-    extra: 1,
-  },
-  {
-    id: 'DR-8821',
-    status: 'completed',
-    deliveredOn: 'Delivered Oct 24, 2023',
-    itemImage: 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=200',
-    itemName: 'Ray-Ban Wayfarer Classic + 2 o...',
-    itemPrice: '₹17,850',
-  },
-  {
-    id: 'DR-7714',
-    status: 'completed',
-    deliveredOn: 'Delivered Oct 12, 2023',
-    itemImage: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-    itemName: 'Nike ZoomX Vaporfly Next% 2',
-    itemPrice: '₹20,999',
-  },
-];
 
 const STEPS = ['PLACED', 'SHIPPED', 'OUT FOR DELIVERY'];
 
 export default function OrderHistoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<Tab>('Ongoing');
+  const { session, isLoggedIn } = useAppState();
 
-  const filtered = ORDERS.filter((o) => {
-    if (activeTab === 'All') return true;
-    if (activeTab === 'Ongoing') return o.status === 'ongoing';
-    return o.status === 'completed';
-  });
+  const [activeTab, setActiveTab] = useState<Tab>('All');
+  const [orders, setOrders] = useState<ApiOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isLoggedIn && session?.token) {
+      fetchOrders();
+    } else {
+      setLoading(false);
+    }
+  }, [isLoggedIn, session?.token]);
+
+  const fetchOrders = async () => {
+    if (!session?.token) return;
+    try {
+      const data = await getOrders(session.token);
+      setOrders(data);
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchOrders();
+  }, [session?.token]);
+
+  const getFilteredOrders = () => {
+    if (activeTab === 'All') return orders;
+    if (activeTab === 'Ongoing') {
+      return orders.filter(o => ['pending', 'confirmed', 'processing', 'shipped'].includes(o.orderStatus.toLowerCase()));
+    }
+    return orders.filter(o => ['delivered', 'completed', 'cancelled', 'refunded'].includes(o.orderStatus.toLowerCase()));
+  };
+
+  const filtered = getFilteredOrders();
+
+  const fmt = (n: number) =>
+    '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const getOrderStatusStep = (status: string) => {
+    status = status.toLowerCase();
+    if (status === 'pending' || status === 'confirmed') return 0;
+    if (status === 'shipped') return 1;
+    if (status === 'out_for_delivery') return 2;
+    return 3;
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#DC2626" />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -87,57 +113,64 @@ export default function OrderHistoryScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#DC2626" />}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}>
 
         {filtered.map((order) => {
-          if (order.status === 'ongoing') {
+          const isOngoing = !['delivered', 'cancelled', 'completed'].includes(order.orderStatus.toLowerCase());
+          const step = getOrderStatusStep(order.orderStatus);
+
+          if (isOngoing) {
             return (
               <View key={order.id} style={styles.card}>
-                {/* Top row */}
                 <View style={styles.ongoingTopRow}>
-                  <Text style={styles.deliveryLabel}>{order.deliveryLabel}</Text>
+                  <Text style={styles.deliveryLabel}>STATUS: {order.orderStatus.toUpperCase()}</Text>
                   <View style={styles.transitBadge}>
-                    <Text style={styles.transitText}>{order.transitLabel}</Text>
+                    <Text style={styles.transitText}>{step >= 1 ? 'IN TRANSIT' : 'PROCESSING'}</Text>
                   </View>
                 </View>
 
-                <Text style={styles.orderNum}>Order #{order.id}</Text>
+                <Text style={styles.orderNum}>Order #{order.orderNumber}</Text>
 
-                {/* Thumbnails */}
                 <View style={styles.thumbRow}>
-                  {order.items?.map((item) => (
+                  {order.order_items.slice(0, 3).map((item) => (
                     <View key={item.id} style={styles.thumb}>
-                      <Image source={{ uri: item.image }} style={styles.thumbImg} resizeMode="cover" />
+                      <Image
+                        source={{ uri: getImageUrl(item.products.product_images?.[0]?.imageUrl) }}
+                        style={styles.thumbImg}
+                        resizeMode="cover"
+                      />
                     </View>
                   ))}
-                  {(order.extra ?? 0) > 0 && (
+                  {order.order_items.length > 3 && (
                     <View style={[styles.thumb, styles.thumbExtra]}>
-                      <Text style={styles.thumbExtraText}>+{order.extra}</Text>
+                      <Text style={styles.thumbExtraText}>+{order.order_items.length - 3}</Text>
                     </View>
                   )}
                 </View>
 
-                {/* Progress */}
                 <View style={styles.progressWrap}>
                   <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${((order.step ?? 0) / (STEPS.length - 1)) * 100}%` }]} />
+                    <View style={[styles.progressFill, { width: `${(Math.min(step, 2) / 2) * 100}%` }]} />
                   </View>
                   <View style={styles.progressLabels}>
                     {STEPS.map((s, i) => (
-                      <Text key={s} style={[styles.progressLabel, i <= (order.step ?? 0) && styles.progressLabelActive]}>
+                      <Text key={s} style={[styles.progressLabel, i <= step && styles.progressLabelActive]}>
                         {s}
                       </Text>
                     ))}
                   </View>
                 </View>
 
-                {/* Buttons */}
                 <View style={styles.btnRow}>
                   <TouchableOpacity style={styles.outlineBtn} activeOpacity={0.85}>
                     <HelpCircle size={15} color="#374151" strokeWidth={2} />
                     <Text style={styles.outlineBtnText}>Need Help?</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.outlineBtn} activeOpacity={0.85}>
+                  <TouchableOpacity
+                    style={styles.outlineBtn}
+                    activeOpacity={0.85}
+                    onPress={() => router.push({ pathname: '/order-success' as any, params: { orderId: order.id } })}>
                     <MapPin size={15} color="#374151" strokeWidth={2} />
                     <Text style={styles.outlineBtnText}>Track Order</Text>
                   </TouchableOpacity>
@@ -146,30 +179,37 @@ export default function OrderHistoryScreen() {
             );
           }
 
+          const firstItem = order.order_items[0];
+
           return (
             <View key={order.id} style={styles.card}>
-              {/* Date + badge */}
               <View style={styles.completedTopRow}>
-                <Text style={styles.deliveredOn}>{order.deliveredOn}</Text>
-                <View style={styles.completedBadge}>
-                  <Text style={styles.completedBadgeText}>COMPLETED</Text>
+                <Text style={styles.deliveredOn}>{new Date(order.createdAt).toLocaleDateString()}</Text>
+                <View style={[styles.completedBadge, order.orderStatus.toLowerCase() === 'cancelled' && { backgroundColor: '#FEE2E2' }]}>
+                  <Text style={[styles.completedBadgeText, order.orderStatus.toLowerCase() === 'cancelled' && { color: '#DC2626' }]}>
+                    {order.orderStatus.toUpperCase()}
+                  </Text>
                 </View>
               </View>
 
-              <Text style={styles.orderNum}>Order #{order.id}</Text>
+              <Text style={styles.orderNum}>Order #{order.orderNumber}</Text>
 
-              {/* Item row */}
-              <View style={styles.completedItemRow}>
-                <View style={styles.completedImgWrap}>
-                  <Image source={{ uri: order.itemImage }} style={styles.completedImg} resizeMode="cover" />
+              {firstItem && (
+                <View style={styles.completedItemRow}>
+                  <View style={styles.completedImgWrap}>
+                    <Image
+                      source={{ uri: getImageUrl(firstItem.products.product_images?.[0]?.imageUrl) }}
+                      style={styles.completedImg}
+                      resizeMode="cover"
+                    />
+                  </View>
+                  <View style={styles.completedItemInfo}>
+                    <Text style={styles.completedItemName} numberOfLines={2}>{firstItem.products.name}</Text>
+                    <Text style={styles.completedItemPrice}>{fmt(toNum(order.totalAmount))}</Text>
+                  </View>
                 </View>
-                <View style={styles.completedItemInfo}>
-                  <Text style={styles.completedItemName} numberOfLines={2}>{order.itemName}</Text>
-                  <Text style={styles.completedItemPrice}>{order.itemPrice}</Text>
-                </View>
-              </View>
+              )}
 
-              {/* Buttons */}
               <View style={styles.btnRow}>
                 <TouchableOpacity style={styles.outlineBtn} activeOpacity={0.85}>
                   <Star size={14} color="#374151" strokeWidth={2} fill="#374151" />
@@ -196,8 +236,6 @@ export default function OrderHistoryScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-
-  /* Header */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -210,8 +248,6 @@ const styles = StyleSheet.create({
   },
   headerIcon: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-
-  /* Tabs */
   tabRow: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
@@ -230,10 +266,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#DC2626',
     borderRadius: 2,
   },
-
   scrollContent: { padding: 14, gap: 14 },
-
-  /* Card */
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -244,8 +277,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
   },
-
-  /* Ongoing */
   ongoingTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   deliveryLabel: { fontSize: 11, fontWeight: '800', color: '#DC2626', letterSpacing: 0.3 },
   transitBadge: {
@@ -256,7 +287,6 @@ const styles = StyleSheet.create({
   },
   transitText: { fontSize: 11, fontWeight: '700', color: '#374151' },
   orderNum: { fontSize: 16, fontWeight: '800', color: '#111827', marginBottom: 14 },
-
   thumbRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
   thumb: {
     width: 64,
@@ -268,7 +298,6 @@ const styles = StyleSheet.create({
   thumbImg: { width: '100%', height: '100%' },
   thumbExtra: { justifyContent: 'center', alignItems: 'center' },
   thumbExtraText: { fontSize: 16, fontWeight: '800', color: '#374151' },
-
   progressWrap: { marginBottom: 18 },
   progressBar: {
     height: 4,
@@ -281,8 +310,6 @@ const styles = StyleSheet.create({
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   progressLabel: { fontSize: 10, fontWeight: '600', color: '#9CA3AF' },
   progressLabelActive: { color: '#DC2626', fontWeight: '800' },
-
-  /* Completed */
   completedTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   deliveredOn: { fontSize: 12, color: '#9CA3AF', fontWeight: '500' },
   completedBadge: {
@@ -292,15 +319,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   completedBadgeText: { fontSize: 11, fontWeight: '800', color: '#16A34A' },
-
   completedItemRow: { flexDirection: 'row', gap: 12, alignItems: 'center', marginVertical: 14 },
   completedImgWrap: { width: 72, height: 72, borderRadius: 10, overflow: 'hidden', backgroundColor: '#F3F4F6' },
   completedImg: { width: '100%', height: '100%' },
   completedItemInfo: { flex: 1 },
   completedItemName: { fontSize: 13, fontWeight: '600', color: '#111827', marginBottom: 6, lineHeight: 18 },
   completedItemPrice: { fontSize: 16, fontWeight: '800', color: '#111827' },
-
-  /* Buttons */
   btnRow: { flexDirection: 'row', gap: 10 },
   outlineBtn: {
     flex: 1,
@@ -325,8 +349,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#DC2626',
   },
   redBtnText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
-
-  /* Empty */
   emptyWrap: { alignItems: 'center', paddingVertical: 60 },
   emptyText: { fontSize: 15, color: '#9CA3AF', fontWeight: '600' },
 });

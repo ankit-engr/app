@@ -18,7 +18,7 @@ import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useToast } from '@/contexts/ToastContext';
-import { googleLogin } from '@/lib/api';
+import { googleLogin, sendEmailOTP } from '@/lib/api';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -30,6 +30,7 @@ export default function LoginScreen() {
   const [showEmailInput, setShowEmailInput] = useState(false);
   const [email, setEmail] = useState('');
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isEmailLoading, setIsEmailLoading] = useState(false);
 
   const googleWebClientId =
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID;
@@ -64,9 +65,29 @@ export default function LoginScreen() {
 
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-  const handleSendOtp = () => {
-    if (!isValidEmail) return;
-    router.push({ pathname: '/verify-email', params: { email: email.trim() } });
+  const handleSendOtp = async () => {
+    if (!isValidEmail || isEmailLoading) return;
+
+    setIsEmailLoading(true);
+    try {
+      const data = await sendEmailOTP(email.trim());
+      router.push({
+        pathname: '/verify-email',
+        params: {
+          email: email.trim(),
+          tempToken: data.tempToken
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send OTP. Please try again.';
+      showToast({
+        title: 'Error',
+        message,
+        type: 'error',
+      });
+    } finally {
+      setIsEmailLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -232,12 +253,18 @@ export default function LoginScreen() {
               />
             </View>
             <TouchableOpacity
-              style={[styles.sendOtpBtn, !isValidEmail && styles.sendOtpBtnDisabled]}
+              style={[styles.sendOtpBtn, (!isValidEmail || isEmailLoading) && styles.sendOtpBtnDisabled]}
               activeOpacity={0.9}
               onPress={handleSendOtp}
-              disabled={!isValidEmail}>
-              <Text style={styles.sendOtpText}>Send OTP</Text>
-              <ArrowRight size={18} color="#FFFFFF" strokeWidth={2.5} />
+              disabled={!isValidEmail || isEmailLoading}>
+              {isEmailLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text style={styles.sendOtpText}>Send OTP</Text>
+                  <ArrowRight size={18} color="#FFFFFF" strokeWidth={2.5} />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}

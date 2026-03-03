@@ -1,42 +1,67 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { X, Truck, MapPin, ShoppingCart, Check } from 'lucide-react-native';
-
-const ORDER_ITEMS = [
-  {
-    id: '1',
-    name: 'Nike Air Zoom Pegasus...',
-    detail: 'Size: 10 • Qty: 1',
-    price: 8900,
-    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-  },
-  {
-    id: '2',
-    name: 'Ray-Ban Wayfarer...',
-    detail: 'Color: Polarized • Qty: 1',
-    price: 12000,
-    image: 'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=200',
-  },
-];
-
-const ORDER_ID = 'DR-882941';
-const subtotal = ORDER_ITEMS.reduce((s, i) => s + i.price, 0);
-const discount = 4180;
-const total = subtotal - discount;
-
-const fmt = (n: number) =>
-  '₹' + (n / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { useAppState } from '@/contexts/AppStateContext';
+import { getOrderByIdApi, ApiOrder, getImageUrl } from '@/lib/api';
+import { useEffect, useState } from 'react';
 
 export default function OrderSuccessScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { session, isLoggedIn } = useAppState();
+  const { orderId } = useLocalSearchParams<{ orderId: string }>();
+
+  const [order, setOrder] = useState<ApiOrder | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (isLoggedIn && session?.token && orderId) {
+      fetchOrder();
+    } else {
+      setLoading(false);
+    }
+  }, [isLoggedIn, session?.token, orderId]);
+
+  const fetchOrder = async () => {
+    if (!session?.token || !orderId) return;
+    try {
+      const data = await getOrderByIdApi(session.token, orderId);
+      setOrder(data);
+    } catch (error) {
+      console.error('Failed to fetch order details:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fmt = (n: number) =>
+    '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#DC2626" />
+      </View>
+    );
+  }
+
+  if (!order) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Text style={{ fontSize: 18, fontWeight: '800', marginBottom: 10 }}>Order not found</Text>
+        <TouchableOpacity style={styles.shopBtn} onPress={() => router.replace('/(tabs)')}>
+          <Text style={styles.shopBtnText}>Go to Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => router.push('/(tabs)')} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.closeBtn} onPress={() => router.replace('/(tabs)')} activeOpacity={0.8}>
           <X size={20} color="#111827" strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Order Status</Text>
@@ -51,9 +76,7 @@ export default function OrderSuccessScreen() {
         {/* ── Success hero ── */}
         <View style={styles.heroWrap}>
           <View style={styles.iconCircle}>
-            {/* Gift box SVG-style using text/emoji alternative */}
             <Text style={styles.giftIcon}>🎁</Text>
-            {/* Green check badge */}
             <View style={styles.checkBadge}>
               <Check size={10} color="#FFFFFF" strokeWidth={3} />
             </View>
@@ -61,7 +84,7 @@ export default function OrderSuccessScreen() {
 
           <Text style={styles.successTitle}>Success! Your Deal is Secured</Text>
           <Text style={styles.successSub}>
-            Your order #{ORDER_ID} has been placed{'\n'}successfully and is being processed.
+            Your order #{order.orderNumber} has been placed{'\n'}successfully and is being processed.
           </Text>
         </View>
 
@@ -72,43 +95,35 @@ export default function OrderSuccessScreen() {
           </View>
           <View>
             <Text style={styles.deliveryLabel}>ESTIMATED DELIVERY</Text>
-            <Text style={styles.deliveryTime}>Tomorrow, by 8:00 PM</Text>
+            <Text style={styles.deliveryTime}>Within 3-5 Business Days</Text>
           </View>
         </View>
 
         {/* ── Items ── */}
         <View style={styles.itemsCard}>
-          <Text style={styles.itemsHeader}>Items ({ORDER_ITEMS.length})</Text>
+          <Text style={styles.itemsHeader}>Items ({order.order_items.length})</Text>
 
-          {ORDER_ITEMS.map((item, idx) => (
+          {order.order_items.map((item, idx) => (
             <View key={item.id}>
               <View style={styles.itemRow}>
                 <View style={styles.itemImgWrap}>
-                  <Image source={{ uri: item.image }} style={styles.itemImg} resizeMode="cover" />
+                  <Image source={{ uri: getImageUrl(item.products.product_images?.[0]?.imageUrl) }} style={styles.itemImg} resizeMode="cover" />
                 </View>
                 <View style={styles.itemInfo}>
-                  <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.itemDetail}>{item.detail}</Text>
+                  <Text style={styles.itemName} numberOfLines={1}>{item.products.name}</Text>
+                  <Text style={styles.itemDetail}>Qty: {item.quantity}</Text>
                 </View>
-                <Text style={styles.itemPrice}>{fmt(item.price)}</Text>
+                <Text style={styles.itemPrice}>{fmt(item.totalPrice)}</Text>
               </View>
-              {idx < ORDER_ITEMS.length - 1 && <View style={styles.itemDivider} />}
+              {idx < order.order_items.length - 1 && <View style={styles.itemDivider} />}
             </View>
           ))}
 
           {/* Price breakdown */}
           <View style={styles.priceDivider} />
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Subtotal</Text>
-            <Text style={styles.priceValue}>{fmt(subtotal)}</Text>
-          </View>
-          <View style={styles.priceRow}>
-            <Text style={styles.discountLabel}>Flash Deal Discount</Text>
-            <Text style={styles.discountValue}>−{fmt(discount)}</Text>
-          </View>
           <View style={[styles.priceRow, { marginTop: 4 }]}>
             <Text style={styles.totalLabel}>Total Charged</Text>
-            <Text style={styles.totalValue}>{fmt(total)}</Text>
+            <Text style={styles.totalValue}>{fmt(order.totalAmount)}</Text>
           </View>
         </View>
 
@@ -117,15 +132,18 @@ export default function OrderSuccessScreen() {
 
       {/* ── Action buttons ── */}
       <View style={[styles.actionsWrap, { paddingBottom: insets.bottom + 12 }]}>
-        <TouchableOpacity style={styles.trackBtn} activeOpacity={0.9}>
+        <TouchableOpacity
+          style={styles.trackBtn}
+          activeOpacity={0.9}
+          onPress={() => router.push({ pathname: '/order-history' as any })}>
           <MapPin size={18} color="#FFFFFF" strokeWidth={2.2} fill="rgba(255,255,255,0.25)" />
-          <Text style={styles.trackBtnText}>Track Order</Text>
+          <Text style={styles.trackBtnText}>My Orders</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.shopBtn}
           activeOpacity={0.9}
-          onPress={() => router.push('/(tabs)')}>
+          onPress={() => router.replace('/(tabs)')}>
           <ShoppingCart size={18} color="#FFFFFF" strokeWidth={2.2} />
           <Text style={styles.shopBtnText}>Continue Shopping</Text>
         </TouchableOpacity>
@@ -136,8 +154,6 @@ export default function OrderSuccessScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-
-  /* Header */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -149,12 +165,8 @@ const styles = StyleSheet.create({
   },
   closeBtn: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-
-  /* Scroll */
   scroll: { flex: 1, backgroundColor: '#FFF5F5' },
   scrollContent: { paddingHorizontal: 16, paddingTop: 32, paddingBottom: 24 },
-
-  /* Hero */
   heroWrap: { alignItems: 'center', marginBottom: 24 },
   iconCircle: {
     width: 90,
@@ -199,8 +211,6 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     paddingHorizontal: 8,
   },
-
-  /* Delivery card */
   deliveryCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -231,8 +241,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   deliveryTime: { fontSize: 15, fontWeight: '800', color: '#111827' },
-
-  /* Items card */
   itemsCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -258,18 +266,10 @@ const styles = StyleSheet.create({
   itemDetail: { fontSize: 12, color: '#9CA3AF', fontWeight: '500' },
   itemPrice: { fontSize: 15, fontWeight: '800', color: '#111827' },
   itemDivider: { height: 1, backgroundColor: '#F9FAFB', marginHorizontal: -4 },
-
-  /* Price breakdown */
   priceDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 14 },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  priceLabel: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  priceValue: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  discountLabel: { fontSize: 14, color: '#DC2626', fontWeight: '500' },
-  discountValue: { fontSize: 14, fontWeight: '700', color: '#DC2626' },
   totalLabel: { fontSize: 15, fontWeight: '800', color: '#111827' },
   totalValue: { fontSize: 15, fontWeight: '900', color: '#111827' },
-
-  /* Action buttons */
   actionsWrap: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -296,6 +296,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    paddingHorizontal: 20
   },
   shopBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
 });

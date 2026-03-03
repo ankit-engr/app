@@ -6,7 +6,8 @@ import { syncGuestCartToDatabase } from '@/lib/api';
 type DealType = 'hourly' | 'daily' | null;
 
 export interface CartItem {
-  id: string;
+  id: string; // Product UUID
+  cloudId?: string | null; // Backend record UUID
   name: string;
   image: string;
   price: number;
@@ -17,11 +18,13 @@ export interface CartItem {
 
 interface SessionData {
   email: string;
+  token: string;
   loggedInAt: string;
 }
 
 interface AddToCartInput {
   id: string;
+  cloudId?: string | null;
   name: string;
   image: string;
   price: number;
@@ -35,11 +38,13 @@ interface AppStateContextValue {
   session: SessionData | null;
   isLoggedIn: boolean;
   cartItems: CartItem[];
-  login: (email: string) => Promise<void>;
+  login: (email: string, token: string) => Promise<void>;
   logout: () => Promise<void>;
   addToCart: (item: AddToCartInput) => void;
   updateCartItemQuantity: (id: string, quantity: number) => void;
   removeCartItem: (id: string) => void;
+  setCartItems: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  clearCart: () => void;
 }
 
 const STORAGE_KEY = 'dealrush.appstate.v1';
@@ -50,12 +55,9 @@ interface PersistedState {
   cartItems: CartItem[];
 }
 
-function toServerProductId(cartItemId: string): string | null {
-  if (cartItemId.startsWith('daily-pick-') || cartItemId.startsWith('wishlist-')) {
-    return null;
-  }
-  const [productId] = cartItemId.split(':');
-  return productId || null;
+function toServerProductId(id: string): string | null {
+  if (id.startsWith('daily-pick-') || id.startsWith('wishlist-')) return null;
+  return id;
 }
 
 function isLocalStorageAvailable() {
@@ -133,26 +135,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     void writePersistedState({ session, cartItems });
   }, [cartItems, isHydrated, session]);
 
-  const login = useCallback(async (email: string) => {
+  const login = useCallback(async (email: string, token: string) => {
     const normalizedEmail = email.trim().toLowerCase();
     const nextSession: SessionData = {
       email: normalizedEmail,
+      token,
       loggedInAt: new Date().toISOString(),
     };
     setSession(nextSession);
 
-    // Best effort: push guest cart to backend once user logs in.
+    // Push guest cart to backend once user logs in.
     const syncItems = cartItems
       .map((item) => ({ productId: toServerProductId(item.id), quantity: item.quantity }))
       .filter((item): item is { productId: string; quantity: number } => !!item.productId && item.quantity > 0);
 
     if (syncItems.length > 0) {
-      void syncGuestCartToDatabase(syncItems);
+      void syncGuestCartToDatabase(syncItems, token);
     }
   }, [cartItems]);
 
   const logout = useCallback(async () => {
     setSession(null);
+    setCartItems([]);
   }, []);
 
   const addToCart = useCallback((item: AddToCartInput) => {
@@ -164,6 +168,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           ...prev,
           {
             id: item.id,
+            cloudId: item.cloudId || null,
             name: item.name,
             image: item.image,
             price: item.price,
@@ -177,11 +182,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       return prev.map((p) =>
         p.id === item.id
           ? {
-              ...p,
-              quantity: p.quantity + qty,
-              price: item.price,
-              originalPrice: item.originalPrice ?? item.price,
-            }
+            ...p,
+            cloudId: item.cloudId || p.cloudId || null,
+            quantity: p.quantity + qty,
+            price: item.price,
+            originalPrice: item.originalPrice ?? item.price,
+          }
           : p
       );
     });
@@ -201,6 +207,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setCartItems((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
+  const clearCart = useCallback(() => {
+    setCartItems([]);
+  }, []);
+
   const value = useMemo<AppStateContextValue>(
     () => ({
       isHydrated,
@@ -212,8 +222,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       addToCart,
       updateCartItemQuantity,
       removeCartItem,
+      setCartItems,
+      clearCart,
     }),
-    [addToCart, cartItems, isHydrated, login, logout, removeCartItem, session, updateCartItemQuantity]
+    [
+      addToCart,
+      cartItems,
+      isHydrated,
+      login,
+      logout,
+      removeCartItem,
+      session,
+      updateCartItemQuantity,
+      clearCart,
+    ]
   );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;

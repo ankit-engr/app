@@ -20,7 +20,7 @@ export default {
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.dealrush.app',
+      bundleIdentifier: 'com.dealrush.shopping.app',
     },
     web: {
       bundler: 'metro',
@@ -40,7 +40,7 @@ export default {
     },
     extra: {
       eas: {
-        projectId: "2e9fe7d9-24b2-44f6-9024-821f30de3bf7"
+        projectId: "8b043e0d-743e-47d8-99d1-d8cf7171037d"
       }
     }
   },

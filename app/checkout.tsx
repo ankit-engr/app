@@ -1,34 +1,166 @@
-import { useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal, SafeAreaView, Platform } from 'react-native';
+import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { ChevronLeft, MapPin, Tag, ChevronRight, ArrowRight, Gift } from 'lucide-react-native';
+import { useAppState } from '@/contexts/AppStateContext';
+import { getAddresses, ApiAddress, createOrder, createPayUOrder, PayUOrderResponse, verifyPayUPayment } from '@/lib/api';
+import { useEffect, useState, useCallback } from 'react';
 
 type Step = 1 | 2 | 3;
 
 export default function CheckoutScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [currentStep] = useState<Step>(2);
+  const { cartItems, session, isLoggedIn, clearCart } = useAppState();
+  const [currentStep, setCurrentStep] = useState<Step>(1);
   const [promoCode, setPromoCode] = useState('');
   const [promoApplied, setPromoApplied] = useState(false);
 
-  const subtotal = 15600;
+  const [addresses, setAddresses] = useState<ApiAddress[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<ApiAddress | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [placingOrder, setPlacingOrder] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [payuData, setPayuData] = useState<PayUOrderResponse | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  const fetchAddresses = async () => {
+    if (!session?.token) return;
+    try {
+      setLoading(true);
+      const data = await getAddresses(session.token);
+      setAddresses(data);
+      if (data.length > 0) {
+        const def = data.find(a => a.isDefault) || data[0];
+        setSelectedAddress(def);
+      }
+    } catch (error) {
+      console.error('Failed to fetch addresses:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchAddresses();
+    }, [session?.token])
+  );
+
+  const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const deliveryFee = 0;
-  const taxRate = 0.08;
-  const tax = Math.round(subtotal * taxRate);
-  const saved = 2400;
+  const tax = Math.round(subtotal * 0.18); // Example GST 18%
   const total = subtotal + deliveryFee + tax;
+  const saved = cartItems.reduce((sum, item) => sum + (item.originalPrice - item.price) * item.quantity, 0);
+
+  const handlePlaceOrder = async () => {
+    if (!selectedAddress) {
+      Alert.alert('Address Required', 'Please select or add a delivery address.');
+      return;
+    }
+
+    if (!session?.token) return;
+
+    setPlacingOrder(true);
+    try {
+      const orderItems = cartItems.map(item => ({
+        productId: item.id,
+        quantity: item.quantity,
+        price: item.price
+      }));
+
+      // 1. Create Order
+      const order = await createOrder(session.token, {
+        shippingAddressId: selectedAddress.id,
+        shippingMethodId: 'default',
+        paymentMethodId: 'payu',
+        items: orderItems,
+      });
+
+      // 2. Initiate PayU Payment
+      const payu = await createPayUOrder(session.token, {
+        orderId: order.id,
+        amount: order.totalAmount,
+      });
+
+      setPayuData(payu);
+      setShowPaymentModal(true);
+
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Order placement failed';
+      Alert.alert('Order Failed', msg);
+    } finally {
+      setPlacingOrder(false);
+    }
+  };
+
+  const onPaymentNavigationChange = async (navState: any) => {
+    const { url } = navState;
+    console.log('WebView URL:', url);
+
+    // Check for success/failure redirects
+    // The backend redirects to FRONTEND_URL/orders/:id?payment_status=...
+    if (url.includes('payment_status=success')) {
+      setShowPaymentModal(false);
+
+      // Optional: Verify on backend
+      setVerifying(true);
+      try {
+        if (session?.token && payuData) {
+          await verifyPayUPayment(session.token, {
+            orderId: payuData.orderId,
+            txnid: payuData.txnid,
+            // Other fields might be needed if not fully handled by callback
+          });
+        }
+      } catch (e) {
+        console.error('Final verification error:', e);
+      } finally {
+        setVerifying(false);
+        // Clear local cart on success
+        clearCart && clearCart();
+        router.push({
+          pathname: '/order-history' as any,
+          params: { refresh: 'true' }
+        });
+        Alert.alert('Success', 'Order placed successfully!');
+      }
+    } else if (url.includes('payment_status=failure')) {
+      setShowPaymentModal(false);
+      Alert.alert('Payment Failed', 'Your payment was unsuccessful. Please try again.');
+    }
+  };
+
+  const getPayUFormHtml = () => {
+    if (!payuData) return '';
+    const { payuPaymentUrl, formData } = payuData;
+
+    return `
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; }
+            .loader { border: 4px solid #f3f3f3; border-top: 4px solid #DC2626; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body onload="document.forms[0].submit()">
+          <div style="text-align: center;">
+            <div class="loader"></div>
+            <p style="margin-top: 20px; color: #666;">Redirecting to PayU...</p>
+          </div>
+          <form action="${payuPaymentUrl}" method="post">
+            ${Object.entries(formData).map(([k, v]) => `<input type="hidden" name="${k}" value="${v}" />`).join('\n')}
+          </form>
+        </body>
+      </html>
+    `;
+  };
 
   const fmt = (n: number) =>
-    '₹' + (n / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const handleApplyPromo = () => {
     if (!promoCode.trim()) return;
@@ -41,6 +173,14 @@ export default function CheckoutScreen() {
     { id: 2, label: 'Payment' },
     { id: 3, label: 'Review' },
   ];
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#DC2626" />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -91,16 +231,25 @@ export default function CheckoutScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.addressCard}>
-            <View style={styles.addressIconWrap}>
-              <MapPin size={18} color="#DC2626" strokeWidth={2.2} fill="rgba(220,38,38,0.12)" />
+          {selectedAddress ? (
+            <View style={styles.addressCard}>
+              <View style={styles.addressIconWrap}>
+                <MapPin size={18} color="#DC2626" strokeWidth={2.2} fill="rgba(220,38,38,0.12)" />
+              </View>
+              <View style={styles.addressDetails}>
+                <Text style={styles.addressLabel}>{selectedAddress.name || 'Default Address'}</Text>
+                <Text style={styles.addressText}>
+                  {selectedAddress.addressLine1}, {selectedAddress.addressLine2 ? selectedAddress.addressLine2 + ', ' : ''}
+                  {selectedAddress.city}, {selectedAddress.state} {selectedAddress.zipCode}
+                </Text>
+                <Text style={styles.addressPhone}>{selectedAddress.phone || 'No phone provided'}</Text>
+              </View>
             </View>
-            <View style={styles.addressDetails}>
-              <Text style={styles.addressLabel}>Home</Text>
-              <Text style={styles.addressText}>123 Maple Street, Apartment 4B, New York, NY 10001, United States</Text>
-              <Text style={styles.addressPhone}>+1 (555) 000-1234</Text>
-            </View>
-          </View>
+          ) : (
+            <TouchableOpacity style={styles.addAddressBtn} onPress={() => router.push('/address-management')}>
+              <Text style={styles.addAddressText}>+ Add New Address</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ── Promo Code ── */}
@@ -157,7 +306,7 @@ export default function CheckoutScreen() {
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Order Summary</Text>
             <View style={styles.itemsBadge}>
-              <Text style={styles.itemsBadgeText}>3 Items</Text>
+              <Text style={styles.itemsBadgeText}>{cartItems.length} Items</Text>
             </View>
           </View>
 
@@ -171,7 +320,7 @@ export default function CheckoutScreen() {
               <Text style={styles.summaryFree}>FREE</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Tax (8%)</Text>
+              <Text style={styles.summaryLabel}>Tax (18%)</Text>
               <Text style={styles.summaryValue}>{fmt(tax)}</Text>
             </View>
             <View style={styles.summaryDivider} />
@@ -200,13 +349,63 @@ export default function CheckoutScreen() {
       {/* ── Place Order Button ── */}
       <View style={[styles.placeOrderWrap, { paddingBottom: insets.bottom + 12 }]}>
         <TouchableOpacity
-          style={styles.placeOrderBtn}
+          style={[styles.placeOrderBtn, placingOrder && { opacity: 0.7 }]}
           activeOpacity={0.9}
-          onPress={() => router.push('/order-success')}>
-          <Text style={styles.placeOrderText}>PLACE ORDER</Text>
-          <ArrowRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+          onPress={handlePlaceOrder}
+          disabled={placingOrder}>
+          {placingOrder ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <>
+              <Text style={styles.placeOrderText}>PLACE ORDER</Text>
+              <ArrowRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+            </>
+          )}
         </TouchableOpacity>
       </View>
+      {/* ── PayU Payment Modal ── */}
+      <Modal
+        visible={showPaymentModal}
+        animationType="slide"
+        onRequestClose={() => {
+          if (!verifying) setShowPaymentModal(false);
+        }}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              onPress={() => setShowPaymentModal(false)}
+              disabled={verifying}
+              style={styles.closeBtn}
+            >
+              <Text style={styles.closeBtnText}>Cancel Payment</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalHeaderTitle}>Secure Payment</Text>
+            <View style={{ width: 80 }} />
+          </View>
+
+          <WebView
+            source={{ html: getPayUFormHtml() }}
+            onNavigationStateChange={onPaymentNavigationChange}
+            style={{ flex: 1 }}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }]}>
+                <ActivityIndicator size="large" color="#DC2626" />
+              </View>
+            )}
+          />
+
+          {verifying && (
+            <View style={styles.verifyingOverlay}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+              <Text style={styles.verifyingText}>Verifying Payment...</Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -302,6 +501,16 @@ const styles = StyleSheet.create({
   addressLabel: { fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 4 },
   addressText: { fontSize: 13, color: '#6B7280', lineHeight: 19, marginBottom: 6 },
   addressPhone: { fontSize: 13, color: '#DC2626', fontWeight: '600' },
+
+  addAddressBtn: {
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  addAddressText: { color: '#DC2626', fontWeight: '700' },
 
   /* Promo */
   promoRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
@@ -428,4 +637,42 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   placeOrderText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15, letterSpacing: 1 },
+
+  /* Modal & WebView */
+  modalHeader: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    backgroundColor: '#FFFFFF',
+  },
+  modalHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  closeBtn: {
+    paddingVertical: 8,
+  },
+  closeBtnText: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  verifyingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  verifyingText: {
+    color: '#FFFFFF',
+    marginTop: 15,
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });

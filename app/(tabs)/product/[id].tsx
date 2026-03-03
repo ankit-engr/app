@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, Heart, Share2, ShoppingCart, Star } from 'lucide-react-native';
-import { getProductById, getProductBySlug, getImageUrl, type ProductDetailResponse } from '@/lib/api';
+import { getProductById, getProductBySlug, getImageUrl, type ProductDetailResponse, addToCartApi, updateCartItemQuantityApi, removeCartItemApi, toggleWishlist } from '@/lib/api';
 import ProductImageGallery from '@/components/ProductImageGallery';
 import { useAppState } from '@/contexts/AppStateContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -60,7 +60,7 @@ function colorToHex(name: string): string | null {
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { addToCart, cartItems, updateCartItemQuantity } = useAppState();
+  const { addToCart, cartItems, updateCartItemQuantity, removeCartItem, session, isLoggedIn } = useAppState();
   const { showToast } = useToast();
   const [detail, setDetail] = useState<ProductDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,27 +159,59 @@ export default function ProductDetailScreen() {
   const cartQuantity = cartItems.find((item) => item.id === cartItemId)?.quantity ?? 0;
   const displayQuantity = cartQuantity > 0 ? cartQuantity : pendingQuantity;
 
-  const incrementQuantity = () => {
-    if (cartQuantity > 0) {
-      updateCartItemQuantity(cartItemId, cartQuantity + 1);
+  const incrementQuantity = async () => {
+    const item = cartItems.find((i) => i.id === cartItemId);
+    if (item && item.quantity > 0) {
+      const next = item.quantity + 1;
+      updateCartItemQuantity(cartItemId, next);
+      if (isLoggedIn && session?.token && item.cloudId) {
+        await updateCartItemQuantityApi(session.token, item.cloudId, next).catch(console.error);
+      }
       return;
     }
     setPendingQuantity((q) => Math.min(99, q + 1));
   };
 
-  const decrementQuantity = () => {
-    if (cartQuantity > 0) {
-      updateCartItemQuantity(cartItemId, cartQuantity - 1);
+  const decrementQuantity = async () => {
+    const item = cartItems.find((i) => i.id === cartItemId);
+    if (item && item.quantity > 0) {
+      const next = item.quantity - 1;
+      if (next === 0) {
+        removeCartItem(cartItemId);
+        if (isLoggedIn && session?.token && item.cloudId) {
+          await removeCartItemApi(session.token, item.cloudId).catch(console.error);
+        }
+      } else {
+        updateCartItemQuantity(cartItemId, next);
+        if (isLoggedIn && session?.token && item.cloudId) {
+          await updateCartItemQuantityApi(session.token, item.cloudId, next).catch(console.error);
+        }
+      }
       return;
     }
     setPendingQuantity((q) => Math.max(1, q - 1));
   };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     const variantSuffix = selectedVariant ? ` (${selectedVariant.name})` : '';
+
+    let backendId: string | null = null;
+    if (isLoggedIn && session?.token) {
+      try {
+        const cloudItem = await addToCartApi(session.token, {
+          productId: p.id,
+          variantId: selectedVariant?.id || null,
+          quantity: pendingQuantity,
+        });
+        backendId = cloudItem.id;
+      } catch (error) {
+        console.error('Failed to add to cart on backend:', error);
+      }
+    }
 
     addToCart({
       id: cartItemId,
+      cloudId: backendId,
       name: `${p.name}${variantSuffix}`,
       image: primaryImage || 'https://picsum.photos/300',
       price: Math.round(effectivePrice),
@@ -392,7 +424,13 @@ export default function ProductDetailScreen() {
 
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          onPress={() => setIsFavorite((v) => !v)}
+          onPress={async () => {
+            const next = !isFavorite;
+            setIsFavorite(next);
+            if (isLoggedIn && session?.token) {
+              await toggleWishlist(session.token, p.id).catch(() => setIsFavorite(!next));
+            }
+          }}
           style={styles.favBtn}
           activeOpacity={0.85}>
           <Heart
