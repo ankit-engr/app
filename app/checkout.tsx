@@ -50,8 +50,9 @@ export default function CheckoutScreen() {
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const deliveryFee = 0;
-  const tax = Math.round(subtotal * 0.18); // Example GST 18%
-  const total = subtotal + deliveryFee + tax;
+  // Price is tax-inclusive - no tax added to total
+  const total = Math.round(subtotal + deliveryFee);
+  const gstPercentages = [...new Set(cartItems.map(item => item.gst).filter((g): g is number => typeof g === 'number' && g > 0))];
   const saved = cartItems.reduce((sum, item) => sum + (item.originalPrice - item.price) * item.quantity, 0);
 
   const handlePlaceOrder = async () => {
@@ -319,10 +320,13 @@ export default function CheckoutScreen() {
               <Text style={styles.summaryLabel}>Delivery Fee</Text>
               <Text style={styles.summaryFree}>FREE</Text>
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Tax (18%)</Text>
-              <Text style={styles.summaryValue}>{fmt(tax)}</Text>
-            </View>
+            {gstPercentages.length > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={[styles.summaryLabel, { fontSize: 12, opacity: 0.8 }]}>
+                  Price includes GST ({gstPercentages.map(g => `${g}%`).join(', ')})
+                </Text>
+              </View>
+            )}
             <View style={styles.summaryDivider} />
             <View style={styles.summaryRow}>
               <Text style={styles.totalLabel}>Total Amount</Text>

@@ -40,7 +40,8 @@ export default function CartScreen() {
         price: toNum(item.unitPrice),
         originalPrice: toNum(item.products.basePrice || item.products.price),
         quantity: item.quantity,
-        dealType: (item.products.activeDealType || null) as any
+        dealType: (item.products.activeDealType || null) as any,
+        gst: item.products.gst || 0
       }));
       setCartItems(cloudItems);
     } catch (error) {

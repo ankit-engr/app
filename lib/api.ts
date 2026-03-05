@@ -648,6 +648,7 @@ export interface BackendCartItem {
     basePrice?: number;
     originalPrice?: number;
     activeDealType?: string | null;
+    gst?: number;
     product_images?: { imageUrl: string }[];
     vendors?: { name: string };
   };

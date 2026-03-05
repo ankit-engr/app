@@ -14,6 +14,7 @@ export interface CartItem {
   originalPrice: number;
   quantity: number;
   dealType: DealType;
+  gst?: number;
 }
 
 interface SessionData {
@@ -31,6 +32,7 @@ interface AddToCartInput {
   originalPrice?: number;
   quantity?: number;
   dealType?: DealType;
+  gst?: number;
 }
 
 interface AppStateContextValue {
@@ -175,6 +177,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             originalPrice: item.originalPrice ?? item.price,
             quantity: qty,
             dealType: item.dealType ?? null,
+            gst: item.gst ?? 0,
           },
         ];
       }
@@ -187,6 +190,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             quantity: p.quantity + qty,
             price: item.price,
             originalPrice: item.originalPrice ?? item.price,
+            gst: item.gst ?? p.gst ?? 0,
           }
           : p
       );
